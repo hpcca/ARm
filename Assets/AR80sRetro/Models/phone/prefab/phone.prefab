@@ -12,7 +12,7 @@ GameObject:
   - component: {fileID: 8523907318697052271}
   - component: {fileID: 5339931631940679273}
   m_Layer: 0
-  m_Name: cell phone(Clone)
+  m_Name: phone
   m_TagString: Untagged
   m_Icon: {fileID: 0}
   m_NavMeshLayer: 0
