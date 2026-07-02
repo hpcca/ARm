@@ -1,5 +1,4 @@
 * text=auto
-
 *.cs text eol=lf
 *.json text eol=lf
 *.md text eol=lf
@@ -8,11 +7,10 @@
 *.unity text eol=lf
 *.prefab text eol=lf
 *.asset text eol=lf
-*.fbx binary
+*.fbx filter=lfs diff=lfs merge=lfs -text
 *.onnx binary
 *.png binary
 *.jpg binary
 *.jpeg binary
 *.tif binary
 *.pdf binary
-*.fbx filter=lfs diff=lfs merge=lfs -text
