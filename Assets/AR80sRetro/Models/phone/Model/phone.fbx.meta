@@ -13,22 +13,22 @@ ModelImporter:
       type: UnityEngine:Texture2D
       assembly: UnityEngine.CoreModule
       name: texture_pbr_20250901
-    second: {fileID: 2800000, guid: 1529ccb8b70a87b49b3298cded494520, type: 3}
+    second: {fileID: 2800000, guid: b723c30d2becc2e4d8e921743dc071ed, type: 3}
   - first:
       type: UnityEngine:Texture2D
       assembly: UnityEngine.CoreModule
       name: texture_pbr_20250901_metallic
-    second: {fileID: 2800000, guid: e9454b60dc1bcf643b082cf4a4dddc55, type: 3}
+    second: {fileID: 2800000, guid: e845847f5870d784e9fb8831d24c580f, type: 3}
   - first:
       type: UnityEngine:Texture2D
       assembly: UnityEngine.CoreModule
       name: texture_pbr_20250901_normal
-    second: {fileID: 2800000, guid: 351a2ec2d4aa3814b92a2bee474b39aa, type: 3}
+    second: {fileID: 2800000, guid: 30a7a27f08bf9694690a8dca6e3d65ff, type: 3}
   - first:
       type: UnityEngine:Texture2D
       assembly: UnityEngine.CoreModule
       name: texture_pbr_20250901_roughness
-    second: {fileID: 2800000, guid: ccf44112aa626a647ad4ffe41d2cc299, type: 3}
+    second: {fileID: 2800000, guid: f001d852fa7f05a4cbfa67e22e42d09d, type: 3}
   materials:
     materialImportMode: 2
     materialName: 0
@@ -61,15 +61,15 @@ ModelImporter:
   meshes:
     lODScreenPercentages: []
     globalScale: 1
-    meshCompression: 0
+    meshCompression: 1
     addColliders: 0
     useSRGBMaterialColor: 1
     sortHierarchyByName: 1
     importPhysicalCameras: 1
     importVisibility: 1
     importBlendShapes: 1
-    importCameras: 1
-    importLights: 1
+    importCameras: 0
+    importLights: 0
     nodeNameCollisionStrategy: 1
     fileIdsGeneration: 2
     swapUVChannels: 0
@@ -103,7 +103,7 @@ ModelImporter:
     blendShapeNormalImportMode: 1
     normalSmoothingSource: 0
   referencedClips: []
-  importAnimation: 1
+  importAnimation: 0
   humanDescription:
     serializedVersion: 3
     human: []

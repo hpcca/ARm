@@ -9,18 +9,28 @@ namespace AR80sRetro
         {
             public GameObject Instance;
             public Pose LastPose;
-            public Vector3 TargetScale;
+            public Pose PendingMovePose;
+            public Vector3 LockedScale;
+            public Quaternion LockedRotation;
+            public Vector3 MoveVelocity;
             public int ConfirmedFrames;
+            public int PendingMoveFrames;
             public float LastSeenTime;
+            public bool HasMoveTarget;
         }
 
         [SerializeField] private RetroPrefabLibrary prefabLibrary;
         [SerializeField] private ARRaycastPositionSolver positionSolver;
         [SerializeField] private Transform contentRoot;
         [SerializeField] private Camera arCamera;
+        [SerializeField] private bool destroyWhenLost;
         [SerializeField] private float lostGraceSeconds = 1f;
         [SerializeField] private float duplicateRadiusMeters = 0.25f;
+        [SerializeField, Min(0.005f)] private float movementDeadZoneMeters = 0.05f;
+        [SerializeField, Min(1)] private int movementConfirmationFrames = 3;
+        [SerializeField, Min(0.01f)] private float movementSmoothTime = 0.25f;
 
+        // Demo scope: one active replacement per detected label. Use spatial tracks if same-class multi-instance is needed.
         private readonly Dictionary<string, TrackedReplacement> trackedByLabel = new Dictionary<string, TrackedReplacement>();
 
         private void Awake()
@@ -40,6 +50,7 @@ namespace AR80sRetro
 
         private void Update()
         {
+            SmoothActiveMoves();
             RemoveExpiredReplacements();
         }
 
@@ -59,18 +70,26 @@ namespace AR80sRetro
                     continue;
                 }
 
-                if (!detection.IsValid(rule.MinConfidence))
+                string key = rule.DetectionLabel.ToLowerInvariant();
+                trackedByLabel.TryGetValue(key, out TrackedReplacement tracked);
+                bool hasLockedInstance = tracked != null && tracked.Instance != null;
+                float requiredConfidence = hasLockedInstance
+                    ? rule.TrackingMinConfidence
+                    : rule.MinConfidence;
+
+                if (!detection.IsValid(requiredConfidence))
                 {
                     continue;
                 }
 
-                if (!positionSolver.TrySolvePose(detection, out Pose pose))
+                if (!positionSolver.TrySolvePose(detection, rule.RaycastAnchorInBoundingBox, out Pose pose))
                 {
                     continue;
                 }
 
                 pose.position += Vector3.up * rule.VerticalOffsetMeters;
-                UpdateReplacement(rule, detection, pose, now);
+                pose.rotation *= rule.RotationOffset;
+                UpdateReplacement(rule, detection, pose, now, tracked);
             }
         }
 
@@ -78,54 +97,109 @@ namespace AR80sRetro
             RetroReplacementRule rule,
             DetectionResult detection,
             Pose pose,
-            float now)
+            float now,
+            TrackedReplacement tracked)
         {
             string key = rule.DetectionLabel.ToLowerInvariant();
-            if (!trackedByLabel.TryGetValue(key, out TrackedReplacement tracked))
+            if (tracked == null)
             {
                 tracked = new TrackedReplacement();
                 trackedByLabel.Add(key, tracked);
             }
 
-            if (tracked.Instance != null)
-            {
-                float distance = Vector3.Distance(tracked.Instance.transform.position, pose.position);
-                if (distance > duplicateRadiusMeters)
-                {
-                    tracked.ConfirmedFrames = 0;
-                }
-            }
-
-            tracked.ConfirmedFrames++;
             tracked.LastSeenTime = now;
-            tracked.LastPose = pose;
 
             if (tracked.Instance == null)
             {
+                if (tracked.ConfirmedFrames > 0
+                    && Vector3.Distance(tracked.LastPose.position, pose.position) > duplicateRadiusMeters)
+                {
+                    tracked.ConfirmedFrames = 0;
+                }
+
+                tracked.ConfirmedFrames++;
+                tracked.LastPose = pose;
+
                 if (tracked.ConfirmedFrames < rule.ConfirmationFrames)
                 {
                     return;
                 }
 
                 tracked.Instance = Instantiate(rule.Prefab, pose.position, pose.rotation, contentRoot);
-                tracked.Instance.transform.localScale = rule.SpawnScale;
-                tracked.TargetScale = EstimateTargetScale(tracked.Instance, rule, detection, pose);
-                tracked.Instance.transform.localScale = tracked.TargetScale;
+                tracked.Instance.transform.localScale = GetBaseScale(rule);
+                tracked.LockedScale = EstimateTargetScale(tracked.Instance, rule, detection, pose);
+                tracked.LockedRotation = pose.rotation;
+                tracked.Instance.transform.localScale = tracked.LockedScale;
+                tracked.Instance.transform.rotation = tracked.LockedRotation;
                 AlignBottomToPlane(tracked.Instance, pose.position.y);
                 return;
             }
 
-            Transform instanceTransform = tracked.Instance.transform;
-            float smoothing = rule.PositionSmoothing;
-            tracked.TargetScale = EstimateTargetScale(tracked.Instance, rule, detection, pose);
-            instanceTransform.localScale = Vector3.Lerp(
-                instanceTransform.localScale,
-                tracked.TargetScale,
-                smoothing);
-            instanceTransform.SetPositionAndRotation(
-                Vector3.Lerp(instanceTransform.position, pose.position, smoothing),
-                Quaternion.Slerp(instanceTransform.rotation, pose.rotation, smoothing));
-            AlignBottomToPlane(tracked.Instance, pose.position.y);
+            tracked.Instance.transform.localScale = tracked.LockedScale;
+            tracked.Instance.transform.rotation = tracked.LockedRotation;
+            QueueMoveIfStable(tracked, pose);
+        }
+
+        private void QueueMoveIfStable(TrackedReplacement tracked, Pose pose)
+        {
+            float distanceFromLockedPose = Vector3.Distance(tracked.LastPose.position, pose.position);
+            if (distanceFromLockedPose < movementDeadZoneMeters)
+            {
+                tracked.PendingMoveFrames = 0;
+                return;
+            }
+
+            if (tracked.PendingMoveFrames == 0
+                || Vector3.Distance(tracked.PendingMovePose.position, pose.position) > movementDeadZoneMeters)
+            {
+                tracked.PendingMovePose = pose;
+                tracked.PendingMoveFrames = 1;
+                return;
+            }
+
+            tracked.PendingMovePose = pose;
+            tracked.PendingMoveFrames++;
+            if (tracked.PendingMoveFrames < movementConfirmationFrames)
+            {
+                return;
+            }
+
+            tracked.LastPose = pose;
+            tracked.HasMoveTarget = true;
+            tracked.PendingMoveFrames = 0;
+        }
+
+        private void SmoothActiveMoves()
+        {
+            foreach (KeyValuePair<string, TrackedReplacement> item in trackedByLabel)
+            {
+                TrackedReplacement tracked = item.Value;
+                if (tracked.Instance == null || !tracked.HasMoveTarget)
+                {
+                    continue;
+                }
+
+                Transform instanceTransform = tracked.Instance.transform;
+                Vector3 targetPosition = instanceTransform.position;
+                targetPosition.x = tracked.LastPose.position.x;
+                targetPosition.z = tracked.LastPose.position.z;
+                instanceTransform.position = Vector3.SmoothDamp(
+                    instanceTransform.position,
+                    targetPosition,
+                    ref tracked.MoveVelocity,
+                    movementSmoothTime);
+                instanceTransform.localScale = tracked.LockedScale;
+                instanceTransform.rotation = tracked.LockedRotation;
+                AlignBottomToPlane(tracked.Instance, tracked.LastPose.position.y);
+
+                Vector2 currentHorizontal = new Vector2(instanceTransform.position.x, instanceTransform.position.z);
+                Vector2 targetHorizontal = new Vector2(tracked.LastPose.position.x, tracked.LastPose.position.z);
+                if (Vector2.Distance(currentHorizontal, targetHorizontal) <= 0.005f)
+                {
+                    tracked.HasMoveTarget = false;
+                    tracked.MoveVelocity = Vector3.zero;
+                }
+            }
         }
 
         private Vector3 EstimateTargetScale(
@@ -136,12 +210,12 @@ namespace AR80sRetro
         {
             if (!rule.EstimateScaleFromBoundingBox || arCamera == null)
             {
-                return rule.SpawnScale;
+                return GetBaseScale(rule);
             }
 
             if (!TryGetRendererBounds(instance, out Bounds bounds) || bounds.size.y <= 0.0001f)
             {
-                return rule.SpawnScale;
+                return GetBaseScale(rule);
             }
 
             float distance = Vector3.Distance(arCamera.transform.position, pose.position);
@@ -150,7 +224,8 @@ namespace AR80sRetro
                 * Mathf.Tan(arCamera.fieldOfView * 0.5f * Mathf.Deg2Rad);
             float targetHeight = detection.NormalizedBox.height
                 * visibleWorldHeight
-                * rule.EstimatedHeightMultiplier;
+                * rule.EstimatedHeightMultiplier
+                * rule.ScaleCalibrationMultiplier;
             float scaleMultiplier = targetHeight / bounds.size.y;
             Vector2 range = rule.ScaleMultiplierRange;
             if (range.x <= 0f && range.y <= 0f)
@@ -162,6 +237,13 @@ namespace AR80sRetro
                 Mathf.Min(range.x, range.y),
                 Mathf.Max(range.x, range.y));
             return Vector3.Scale(instance.transform.localScale, Vector3.one * scaleMultiplier);
+        }
+
+        private static Vector3 GetBaseScale(RetroReplacementRule rule)
+        {
+            return Vector3.Scale(
+                rule.SpawnScale,
+                Vector3.one * rule.ScaleCalibrationMultiplier);
         }
 
         private static void AlignBottomToPlane(GameObject instance, float planeHeight)
@@ -197,7 +279,7 @@ namespace AR80sRetro
 
         private void RemoveExpiredReplacements()
         {
-            if (lostGraceSeconds <= 0f)
+            if (!destroyWhenLost || lostGraceSeconds <= 0f)
             {
                 return;
             }

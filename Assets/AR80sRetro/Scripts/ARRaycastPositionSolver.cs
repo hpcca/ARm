@@ -22,6 +22,14 @@ namespace AR80sRetro
 
         public bool TrySolvePose(DetectionResult detection, out Pose pose)
         {
+            return TrySolvePose(detection, anchorInBoundingBox, out pose);
+        }
+
+        public bool TrySolvePose(
+            DetectionResult detection,
+            Vector2 normalizedAnchorInBox,
+            out Pose pose)
+        {
             pose = default;
 
             if (raycastManager == null)
@@ -29,7 +37,7 @@ namespace AR80sRetro
                 return false;
             }
 
-            Vector2 effectiveAnchor = anchorInBoundingBox;
+            Vector2 effectiveAnchor = normalizedAnchorInBox;
             if (effectiveAnchor == Vector2.zero)
             {
                 effectiveAnchor = new Vector2(0.5f, 0.9f);

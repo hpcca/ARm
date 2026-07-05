@@ -6235,8 +6235,12 @@ MonoBehaviour:
   positionSolver: {fileID: 1702211326}
   contentRoot: {fileID: 1702211327}
   arCamera: {fileID: 331264287}
+  destroyWhenLost: 0
   lostGraceSeconds: 1
   duplicateRadiusMeters: 0.25
+  movementDeadZoneMeters: 0.05
+  movementConfirmationFrames: 3
+  movementSmoothTime: 0.25
 --- !u!114 &1702211326
 MonoBehaviour:
   m_ObjectHideFlags: 0
@@ -6345,7 +6349,7 @@ MonoBehaviour:
   modelAsset: {fileID: 5022602860645237092, guid: 5a65458920e38b24abedefba87ef12d2, type: 3}
   frameProvider: {fileID: 1702211329}
   backendType: 256
-  inferenceIntervalSeconds: 0.5
+  inferenceIntervalSeconds: 0.25
   confidenceThreshold: 0.25
   iouThreshold: 0.45
   maxDetections: 3
