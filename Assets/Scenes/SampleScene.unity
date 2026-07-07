@@ -6237,6 +6237,8 @@ MonoBehaviour:
   arCamera: {fileID: 331264287}
   destroyWhenLost: 0
   lostGraceSeconds: 1
+  lostStateDelaySeconds: 1
+  reacquireMatchRadiusMeters: 0.4
   duplicateRadiusMeters: 0.25
   movementDeadZoneMeters: 0.05
   movementConfirmationFrames: 3

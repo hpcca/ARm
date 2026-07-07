@@ -5,6 +5,15 @@ namespace AR80sRetro
 {
     public sealed class RetroReplacementManager : MonoBehaviour
     {
+        private enum ReplacementState
+        {
+            Searching,
+            Acquiring,
+            Locked,
+            TrackingMove,
+            Lost
+        }
+
         private sealed class TrackedReplacement
         {
             public GameObject Instance;
@@ -17,6 +26,7 @@ namespace AR80sRetro
             public int PendingMoveFrames;
             public float LastSeenTime;
             public bool HasMoveTarget;
+            public ReplacementState State = ReplacementState.Searching;
         }
 
         [SerializeField] private RetroPrefabLibrary prefabLibrary;
@@ -25,6 +35,8 @@ namespace AR80sRetro
         [SerializeField] private Camera arCamera;
         [SerializeField] private bool destroyWhenLost;
         [SerializeField] private float lostGraceSeconds = 1f;
+        [SerializeField, Min(0f)] private float lostStateDelaySeconds = 1f;
+        [SerializeField, Min(0.05f)] private float reacquireMatchRadiusMeters = 0.4f;
         [SerializeField] private float duplicateRadiusMeters = 0.25f;
         [SerializeField, Min(0.005f)] private float movementDeadZoneMeters = 0.05f;
         [SerializeField, Min(1)] private int movementConfirmationFrames = 3;
@@ -50,6 +62,7 @@ namespace AR80sRetro
 
         private void Update()
         {
+            UpdateLostStates();
             SmoothActiveMoves();
             RemoveExpiredReplacements();
         }
@@ -107,10 +120,19 @@ namespace AR80sRetro
                 trackedByLabel.Add(key, tracked);
             }
 
+            if (tracked.Instance != null
+                && tracked.State == ReplacementState.Lost
+                && !IsWithinReacquireRadius(tracked, pose))
+            {
+                return;
+            }
+
             tracked.LastSeenTime = now;
 
             if (tracked.Instance == null)
             {
+                tracked.State = ReplacementState.Acquiring;
+
                 if (tracked.ConfirmedFrames > 0
                     && Vector3.Distance(tracked.LastPose.position, pose.position) > duplicateRadiusMeters)
                 {
@@ -132,6 +154,7 @@ namespace AR80sRetro
                 tracked.Instance.transform.localScale = tracked.LockedScale;
                 tracked.Instance.transform.rotation = tracked.LockedRotation;
                 AlignBottomToPlane(tracked.Instance, pose.position.y);
+                tracked.State = ReplacementState.Locked;
                 return;
             }
 
@@ -146,6 +169,7 @@ namespace AR80sRetro
             if (distanceFromLockedPose < movementDeadZoneMeters)
             {
                 tracked.PendingMoveFrames = 0;
+                tracked.State = ReplacementState.Locked;
                 return;
             }
 
@@ -166,6 +190,7 @@ namespace AR80sRetro
 
             tracked.LastPose = pose;
             tracked.HasMoveTarget = true;
+            tracked.State = ReplacementState.TrackingMove;
             tracked.PendingMoveFrames = 0;
         }
 
@@ -198,8 +223,56 @@ namespace AR80sRetro
                 {
                     tracked.HasMoveTarget = false;
                     tracked.MoveVelocity = Vector3.zero;
+                    tracked.State = ReplacementState.Locked;
                 }
             }
+        }
+
+        private void UpdateLostStates()
+        {
+            if (lostStateDelaySeconds <= 0f)
+            {
+                return;
+            }
+
+            float now = Time.time;
+            foreach (KeyValuePair<string, TrackedReplacement> item in trackedByLabel)
+            {
+                TrackedReplacement tracked = item.Value;
+                if (tracked.State == ReplacementState.Searching
+                    || tracked.State == ReplacementState.Lost)
+                {
+                    continue;
+                }
+
+                if (now - tracked.LastSeenTime <= lostStateDelaySeconds)
+                {
+                    continue;
+                }
+
+                if (tracked.Instance == null)
+                {
+                    tracked.State = ReplacementState.Searching;
+                    tracked.ConfirmedFrames = 0;
+                    tracked.PendingMoveFrames = 0;
+                    continue;
+                }
+
+                tracked.State = ReplacementState.Lost;
+                tracked.HasMoveTarget = false;
+                tracked.PendingMoveFrames = 0;
+                tracked.MoveVelocity = Vector3.zero;
+            }
+        }
+
+        private bool IsWithinReacquireRadius(TrackedReplacement tracked, Pose pose)
+        {
+            if (reacquireMatchRadiusMeters <= 0f)
+            {
+                return true;
+            }
+
+            return Vector3.Distance(tracked.LastPose.position, pose.position) <= reacquireMatchRadiusMeters;
         }
 
         private Vector3 EstimateTargetScale(
