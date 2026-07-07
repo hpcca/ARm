@@ -6,6 +6,13 @@ namespace AR80sRetro
     [Serializable]
     public sealed class RetroReplacementRule
     {
+        public enum ScaleBoundingBoxAxis
+        {
+            Height,
+            Width,
+            MaxDimension
+        }
+
         [SerializeField] private string detectionLabel = "cup";
         [SerializeField] private GameObject prefab;
         [SerializeField] private Vector3 spawnScale = Vector3.one;
@@ -18,7 +25,9 @@ namespace AR80sRetro
         [SerializeField] private int confirmationFrames = 2;
         [SerializeField, Range(0.01f, 1f)] private float positionSmoothing = 0.18f;
         [SerializeField] private bool estimateScaleFromBoundingBox = true;
+        [SerializeField] private ScaleBoundingBoxAxis scaleBoundingBoxAxis = ScaleBoundingBoxAxis.Height;
         [SerializeField, Min(0.1f)] private float estimatedHeightMultiplier = 0.9f;
+        [SerializeField, Min(0.1f)] private float estimatedWidthMultiplier = 0.9f;
         [SerializeField] private Vector2 scaleMultiplierRange = new Vector2(0.25f, 4f);
 
         public string DetectionLabel => detectionLabel;
@@ -35,7 +44,9 @@ namespace AR80sRetro
         public int ConfirmationFrames => Mathf.Max(1, confirmationFrames);
         public float PositionSmoothing => positionSmoothing;
         public bool EstimateScaleFromBoundingBox => estimateScaleFromBoundingBox;
+        public ScaleBoundingBoxAxis BoundingBoxScaleAxis => scaleBoundingBoxAxis;
         public float EstimatedHeightMultiplier => estimatedHeightMultiplier;
+        public float EstimatedWidthMultiplier => estimatedWidthMultiplier;
         public Vector2 ScaleMultiplierRange => scaleMultiplierRange;
     }
 }

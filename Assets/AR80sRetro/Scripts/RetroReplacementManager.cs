@@ -16,6 +16,7 @@ namespace AR80sRetro
 
         private sealed class TrackedReplacement
         {
+            public string Label;
             public GameObject Instance;
             public Pose LastPose;
             public Pose PendingMovePose;
@@ -26,6 +27,7 @@ namespace AR80sRetro
             public int PendingMoveFrames;
             public float LastSeenTime;
             public bool HasMoveTarget;
+            public int LastMatchedFrame = -1;
             public ReplacementState State = ReplacementState.Searching;
         }
 
@@ -42,8 +44,7 @@ namespace AR80sRetro
         [SerializeField, Min(1)] private int movementConfirmationFrames = 3;
         [SerializeField, Min(0.01f)] private float movementSmoothTime = 0.25f;
 
-        // Demo scope: one active replacement per detected label. Use spatial tracks if same-class multi-instance is needed.
-        private readonly Dictionary<string, TrackedReplacement> trackedByLabel = new Dictionary<string, TrackedReplacement>();
+        private readonly List<TrackedReplacement> trackedReplacements = new List<TrackedReplacement>();
 
         private void Awake()
         {
@@ -84,13 +85,7 @@ namespace AR80sRetro
                 }
 
                 string key = rule.DetectionLabel.ToLowerInvariant();
-                trackedByLabel.TryGetValue(key, out TrackedReplacement tracked);
-                bool hasLockedInstance = tracked != null && tracked.Instance != null;
-                float requiredConfidence = hasLockedInstance
-                    ? rule.TrackingMinConfidence
-                    : rule.MinConfidence;
-
-                if (!detection.IsValid(requiredConfidence))
+                if (!detection.IsValid(rule.TrackingMinConfidence))
                 {
                     continue;
                 }
@@ -102,6 +97,27 @@ namespace AR80sRetro
 
                 pose.position += Vector3.up * rule.VerticalOffsetMeters;
                 pose.rotation *= rule.RotationOffset;
+
+                TrackedReplacement tracked = FindBestTrack(key, pose, Time.frameCount);
+                bool hasLockedInstance = tracked != null && tracked.Instance != null;
+                float requiredConfidence = hasLockedInstance
+                    ? rule.TrackingMinConfidence
+                    : rule.MinConfidence;
+                if (!detection.IsValid(requiredConfidence))
+                {
+                    continue;
+                }
+
+                if (tracked == null)
+                {
+                    tracked = new TrackedReplacement
+                    {
+                        Label = key
+                    };
+                    trackedReplacements.Add(tracked);
+                }
+
+                tracked.LastMatchedFrame = Time.frameCount;
                 UpdateReplacement(rule, detection, pose, now, tracked);
             }
         }
@@ -113,13 +129,6 @@ namespace AR80sRetro
             float now,
             TrackedReplacement tracked)
         {
-            string key = rule.DetectionLabel.ToLowerInvariant();
-            if (tracked == null)
-            {
-                tracked = new TrackedReplacement();
-                trackedByLabel.Add(key, tracked);
-            }
-
             if (tracked.Instance != null
                 && tracked.State == ReplacementState.Lost
                 && !IsWithinReacquireRadius(tracked, pose))
@@ -196,9 +205,9 @@ namespace AR80sRetro
 
         private void SmoothActiveMoves()
         {
-            foreach (KeyValuePair<string, TrackedReplacement> item in trackedByLabel)
+            for (int i = 0; i < trackedReplacements.Count; i++)
             {
-                TrackedReplacement tracked = item.Value;
+                TrackedReplacement tracked = trackedReplacements[i];
                 if (tracked.Instance == null || !tracked.HasMoveTarget)
                 {
                     continue;
@@ -236,9 +245,9 @@ namespace AR80sRetro
             }
 
             float now = Time.time;
-            foreach (KeyValuePair<string, TrackedReplacement> item in trackedByLabel)
+            for (int i = 0; i < trackedReplacements.Count; i++)
             {
-                TrackedReplacement tracked = item.Value;
+                TrackedReplacement tracked = trackedReplacements[i];
                 if (tracked.State == ReplacementState.Searching
                     || tracked.State == ReplacementState.Lost)
                 {
@@ -275,6 +284,43 @@ namespace AR80sRetro
             return Vector3.Distance(tracked.LastPose.position, pose.position) <= reacquireMatchRadiusMeters;
         }
 
+        private TrackedReplacement FindBestTrack(
+            string label,
+            Pose pose,
+            int frame)
+        {
+            TrackedReplacement best = null;
+            float bestDistance = float.PositiveInfinity;
+
+            for (int i = 0; i < trackedReplacements.Count; i++)
+            {
+                TrackedReplacement tracked = trackedReplacements[i];
+                if (!string.Equals(tracked.Label, label, System.StringComparison.OrdinalIgnoreCase)
+                    || tracked.LastMatchedFrame == frame)
+                {
+                    continue;
+                }
+
+                float distance = Vector3.Distance(tracked.LastPose.position, pose.position);
+                float matchRadius = tracked.Instance == null
+                    ? duplicateRadiusMeters
+                    : reacquireMatchRadiusMeters;
+
+                if (matchRadius > 0f && distance > matchRadius)
+                {
+                    continue;
+                }
+
+                if (distance < bestDistance)
+                {
+                    bestDistance = distance;
+                    best = tracked;
+                }
+            }
+
+            return best;
+        }
+
         private Vector3 EstimateTargetScale(
             GameObject instance,
             RetroReplacementRule rule,
@@ -286,7 +332,8 @@ namespace AR80sRetro
                 return GetBaseScale(rule);
             }
 
-            if (!TryGetRendererBounds(instance, out Bounds bounds) || bounds.size.y <= 0.0001f)
+            if (!TryGetRendererBounds(instance, out Bounds bounds)
+                || (bounds.size.x <= 0.0001f && bounds.size.y <= 0.0001f))
             {
                 return GetBaseScale(rule);
             }
@@ -295,11 +342,16 @@ namespace AR80sRetro
             float visibleWorldHeight = 2f
                 * distance
                 * Mathf.Tan(arCamera.fieldOfView * 0.5f * Mathf.Deg2Rad);
+            float visibleWorldWidth = visibleWorldHeight * arCamera.aspect;
             float targetHeight = detection.NormalizedBox.height
                 * visibleWorldHeight
                 * rule.EstimatedHeightMultiplier
                 * rule.ScaleCalibrationMultiplier;
-            float scaleMultiplier = targetHeight / bounds.size.y;
+            float targetWidth = detection.NormalizedBox.width
+                * visibleWorldWidth
+                * rule.EstimatedWidthMultiplier
+                * rule.ScaleCalibrationMultiplier;
+            float scaleMultiplier = CalculateScaleMultiplier(rule, bounds, targetWidth, targetHeight);
             Vector2 range = rule.ScaleMultiplierRange;
             if (range.x <= 0f && range.y <= 0f)
             {
@@ -310,6 +362,30 @@ namespace AR80sRetro
                 Mathf.Min(range.x, range.y),
                 Mathf.Max(range.x, range.y));
             return Vector3.Scale(instance.transform.localScale, Vector3.one * scaleMultiplier);
+        }
+
+        private static float CalculateScaleMultiplier(
+            RetroReplacementRule rule,
+            Bounds bounds,
+            float targetWidth,
+            float targetHeight)
+        {
+            float heightMultiplier = bounds.size.y > 0.0001f
+                ? targetHeight / bounds.size.y
+                : 0f;
+            float widthMultiplier = bounds.size.x > 0.0001f
+                ? targetWidth / bounds.size.x
+                : 0f;
+
+            switch (rule.BoundingBoxScaleAxis)
+            {
+                case RetroReplacementRule.ScaleBoundingBoxAxis.Width:
+                    return widthMultiplier > 0f ? widthMultiplier : heightMultiplier;
+                case RetroReplacementRule.ScaleBoundingBoxAxis.MaxDimension:
+                    return Mathf.Max(widthMultiplier, heightMultiplier);
+                default:
+                    return heightMultiplier > 0f ? heightMultiplier : widthMultiplier;
+            }
         }
 
         private static Vector3 GetBaseScale(RetroReplacementRule rule)
@@ -352,35 +428,35 @@ namespace AR80sRetro
 
         private void RemoveExpiredReplacements()
         {
-            if (!destroyWhenLost || lostGraceSeconds <= 0f)
+            if (lostGraceSeconds <= 0f)
             {
                 return;
             }
 
             float now = Time.time;
-            s_ReusableExpiredKeys.Clear();
-
-            foreach (KeyValuePair<string, TrackedReplacement> item in trackedByLabel)
+            for (int i = trackedReplacements.Count - 1; i >= 0; i--)
             {
-                if (now - item.Value.LastSeenTime > lostGraceSeconds)
+                TrackedReplacement tracked = trackedReplacements[i];
+                if (now - tracked.LastSeenTime <= lostGraceSeconds)
                 {
-                    s_ReusableExpiredKeys.Add(item.Key);
-                }
-            }
-
-            for (int i = 0; i < s_ReusableExpiredKeys.Count; i++)
-            {
-                string key = s_ReusableExpiredKeys[i];
-                TrackedReplacement tracked = trackedByLabel[key];
-                if (tracked.Instance != null)
-                {
-                    Destroy(tracked.Instance);
+                    continue;
                 }
 
-                trackedByLabel.Remove(key);
+                if (tracked.Instance == null)
+                {
+                    trackedReplacements.RemoveAt(i);
+                    continue;
+                }
+
+                if (!destroyWhenLost)
+                {
+                    continue;
+                }
+
+                Destroy(tracked.Instance);
+
+                trackedReplacements.RemoveAt(i);
             }
         }
-
-        private static readonly List<string> s_ReusableExpiredKeys = new List<string>();
     }
 }

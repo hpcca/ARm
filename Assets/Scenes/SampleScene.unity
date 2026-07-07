@@ -6354,7 +6354,7 @@ MonoBehaviour:
   inferenceIntervalSeconds: 0.25
   confidenceThreshold: 0.25
   iouThreshold: 0.45
-  maxDetections: 3
+  maxDetections: 12
   logDetections: 1
   diagnosticLogInterval: 10
 --- !u!1 &1756045394

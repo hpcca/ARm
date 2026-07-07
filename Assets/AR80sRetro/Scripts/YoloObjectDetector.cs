@@ -1,5 +1,6 @@
 using System;
 using System.Collections.Generic;
+using System.Text;
 using Unity.Sentis;
 using UnityEngine;
 
@@ -35,16 +36,31 @@ namespace AR80sRetro
 
         private const int InputSize = 640;
         private const int CocoClassCount = 80;
+        private const int BottleClassIndex = 39;
         private const int CupClassIndex = 41;
+        private const int ChairClassIndex = 56;
+        private const int CouchClassIndex = 57;
+        private const int PlantClassIndex = 58;
+        private const int TableClassIndex = 60;
         private const int TvClassIndex = 62;
         private const int PhoneClassIndex = 67;
+        private const string BottleLabel = "bottle";
         private const string CupLabel = "cup";
+        private const string ChairLabel = "chair";
+        private const string CouchLabel = "couch";
+        private const string PlantLabel = "plant";
+        private const string TableLabel = "table";
         private const string TvLabel = "tv";
         private const string PhoneLabel = "phone";
 
         private static readonly TargetClass[] TargetClasses =
         {
+            new TargetClass(BottleClassIndex, BottleLabel),
             new TargetClass(CupClassIndex, CupLabel),
+            new TargetClass(ChairClassIndex, ChairLabel),
+            new TargetClass(CouchClassIndex, CouchLabel),
+            new TargetClass(PlantClassIndex, PlantLabel),
+            new TargetClass(TableClassIndex, TableLabel),
             new TargetClass(TvClassIndex, TvLabel),
             new TargetClass(PhoneClassIndex, PhoneLabel)
         };
@@ -58,15 +74,16 @@ namespace AR80sRetro
         [SerializeField, Min(0.1f)] private float inferenceIntervalSeconds = 0.25f;
         [SerializeField, Range(0.05f, 1f)] private float confidenceThreshold = 0.45f;
         [SerializeField, Range(0.05f, 1f)] private float iouThreshold = 0.45f;
-        [SerializeField, Min(1)] private int maxDetections = 3;
+        [SerializeField, Min(1)] private int maxDetections = 12;
         [SerializeField] private bool logDetections = true;
         [SerializeField, Min(1)] private int diagnosticLogInterval = 10;
 
         public event Action<IReadOnlyList<DetectionResult>> DetectionsReady;
 
-        private readonly List<Candidate> candidates = new List<Candidate>(32);
-        private readonly List<Candidate> selectedCandidates = new List<Candidate>(8);
-        private readonly List<DetectionResult> detectionResults = new List<DetectionResult>(8);
+        private readonly List<Candidate> candidates = new List<Candidate>(64);
+        private readonly List<Candidate> selectedCandidates = new List<Candidate>(16);
+        private readonly List<DetectionResult> detectionResults = new List<DetectionResult>(16);
+        private readonly float[] highestTargetConfidences = new float[TargetClasses.Length];
 
         private Worker worker;
         private Tensor<float> inputTensor;
@@ -211,9 +228,7 @@ namespace AR80sRetro
             ReadOnlySpan<float> values = output.AsReadOnlySpan();
             float highestAnyConfidence = 0f;
             int highestClassIndex = -1;
-            float highestCupConfidence = 0f;
-            float highestTvConfidence = 0f;
-            float highestPhoneConfidence = 0f;
+            Array.Clear(highestTargetConfidences, 0, highestTargetConfidences.Length);
 
             for (int boxIndex = 0; boxIndex < boxCount; boxIndex++)
             {
@@ -246,18 +261,9 @@ namespace AR80sRetro
                         boxIndex,
                         targetClass.Index + 4);
 
-                    if (targetClass.Index == CupClassIndex)
-                    {
-                        highestCupConfidence = Mathf.Max(highestCupConfidence, confidence);
-                    }
-                    else if (targetClass.Index == TvClassIndex)
-                    {
-                        highestTvConfidence = Mathf.Max(highestTvConfidence, confidence);
-                    }
-                    else if (targetClass.Index == PhoneClassIndex)
-                    {
-                        highestPhoneConfidence = Mathf.Max(highestPhoneConfidence, confidence);
-                    }
+                    highestTargetConfidences[targetIndex] = Mathf.Max(
+                        highestTargetConfidences[targetIndex],
+                        confidence);
 
                     if (confidence > targetConfidence)
                     {
@@ -295,8 +301,8 @@ namespace AR80sRetro
             {
                 Debug.Log(
                     $"YOLO diagnostics: bestClass={highestClassIndex}, bestScore={highestAnyConfidence:F3}, " +
-                    $"cupScore={highestCupConfidence:F3}, tvScore={highestTvConfidence:F3}, " +
-                    $"phoneScore={highestPhoneConfidence:F3}, frame={frameProvider.CameraTexture.width}x{frameProvider.CameraTexture.height}",
+                    $"{FormatTargetScores(highestTargetConfidences)}, " +
+                    $"frame={frameProvider.CameraTexture.width}x{frameProvider.CameraTexture.height}",
                     this);
             }
 
@@ -363,6 +369,24 @@ namespace AR80sRetro
             return channelsFirst
                 ? values[channelIndex * boxCount + boxIndex]
                 : values[boxIndex * (CocoClassCount + 4) + channelIndex];
+        }
+
+        private static string FormatTargetScores(float[] scores)
+        {
+            StringBuilder builder = new StringBuilder(128);
+            for (int i = 0; i < TargetClasses.Length; i++)
+            {
+                if (i > 0)
+                {
+                    builder.Append(", ");
+                }
+
+                builder.Append(TargetClasses[i].Label);
+                builder.Append("Score=");
+                builder.Append(scores[i].ToString("F3"));
+            }
+
+            return builder.ToString();
         }
 
         private static float CalculateIntersectionOverUnion(Rect first, Rect second)

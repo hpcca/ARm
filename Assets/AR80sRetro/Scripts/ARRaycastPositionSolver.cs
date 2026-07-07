@@ -13,6 +13,7 @@ namespace AR80sRetro
         [SerializeField] private Camera arCamera;
         [SerializeField] private TrackableType trackableTypes = TrackableType.PlaneWithinPolygon;
         [SerializeField] private Vector2 anchorInBoundingBox = new Vector2(0.5f, 0.9f);
+        [SerializeField] private bool faceCamera;
 
         private void Reset()
         {
@@ -54,7 +55,7 @@ namespace AR80sRetro
 
             pose = Hits[0].pose;
 
-            if (arCamera != null)
+            if (faceCamera && arCamera != null)
             {
                 Vector3 toCamera = arCamera.transform.position - pose.position;
                 toCamera.y = 0f;
