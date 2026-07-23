@@ -360,8 +360,8 @@ MonoBehaviour:
   m_Enabled: 1
   m_EditorHideFlags: 0
   m_Script: {fileID: 11500000, guid: 4e29b1a8efbd4b44bb3f3716e73f07ff, type: 3}
-  m_Name: 
-  m_EditorClassIdentifier: 
+  m_Name:
+  m_EditorClassIdentifier:
   m_Navigation:
     m_Mode: 3
     m_WrapAround: 0
@@ -1182,7 +1182,10 @@ PrefabInstance:
     - targetCorrespondingSourceObject: {fileID: 2512387470890420967, guid: 48cb3fb68c91eb94999fd99957eb0cae, type: 3}
       insertIndex: 0
       addedObject: {fileID: 436358034}
-    m_AddedComponents: []
+    m_AddedComponents:
+    - targetCorrespondingSourceObject: {fileID: 2512387469002778309, guid: 48cb3fb68c91eb94999fd99957eb0cae, type: 3}
+      insertIndex: -1
+      addedObject: {fileID: 1702211333}
   m_SourcePrefab: {fileID: 100100000, guid: 48cb3fb68c91eb94999fd99957eb0cae, type: 3}
 --- !u!114 &331264286 stripped
 MonoBehaviour:
@@ -1198,6 +1201,11 @@ MonoBehaviour:
 --- !u!20 &331264287 stripped
 Camera:
   m_CorrespondingSourceObject: {fileID: 2512387469002778331, guid: 48cb3fb68c91eb94999fd99957eb0cae, type: 3}
+  m_PrefabInstance: {fileID: 331264285}
+  m_PrefabAsset: {fileID: 0}
+--- !u!1 &331264289 stripped
+GameObject:
+  m_CorrespondingSourceObject: {fileID: 2512387469002778309, guid: 48cb3fb68c91eb94999fd99957eb0cae, type: 3}
   m_PrefabInstance: {fileID: 331264285}
   m_PrefabAsset: {fileID: 0}
 --- !u!114 &331264288 stripped
@@ -6191,7 +6199,6 @@ GameObject:
   - component: {fileID: 1702211332}
   - component: {fileID: 1702211331}
   - component: {fileID: 1702211330}
-  - component: {fileID: 1702211333}
   - component: {fileID: 1702211334}
   m_Layer: 0
   m_Name: AR80sRetro System
@@ -6245,6 +6252,12 @@ MonoBehaviour:
   movementDeadZoneMeters: 0.05
   movementConfirmationFrames: 3
   movementSmoothTime: 0.25
+  depthProvider: {fileID: 1702211334}
+  fadeWhenDepthUnavailable: 1
+  depthStartupGraceSeconds: 2
+  fallbackFadeDelaySeconds: 0.35
+  fallbackFadeDurationSeconds: 0.35
+  fallbackMinimumOpacity: 0.2
 --- !u!114 &1702211326
 MonoBehaviour:
   m_ObjectHideFlags: 0
@@ -6369,7 +6382,7 @@ MonoBehaviour:
   m_CorrespondingSourceObject: {fileID: 0}
   m_PrefabInstance: {fileID: 0}
   m_PrefabAsset: {fileID: 0}
-  m_GameObject: {fileID: 1702211323}
+  m_GameObject: {fileID: 331264289}
   m_Enabled: 1
   m_EditorHideFlags: 0
   m_Script: {fileID: 11500000, guid: b15f82cc229284894964d2d30806969d, type: 3}
@@ -6400,6 +6413,7 @@ MonoBehaviour:
   minDepthMeters: 0.15
   maxDepthMeters: 8
   minConfidence: 1
+  depthAvailabilityGraceSeconds: 0.5
   flipDepthX: 0
   flipDepthY: 1
   logDepthAvailability: 0

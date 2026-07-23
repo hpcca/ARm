@@ -1,10 +1,21 @@
 using System.Collections.Generic;
 using UnityEngine;
+using UnityEngine.Rendering;
 
 namespace AR80sRetro
 {
     public sealed class RetroReplacementManager : MonoBehaviour
     {
+        private static readonly int BaseColorId = Shader.PropertyToID("_BaseColor");
+        private static readonly int ColorId = Shader.PropertyToID("_Color");
+        private static readonly int SurfaceId = Shader.PropertyToID("_Surface");
+        private static readonly int BlendId = Shader.PropertyToID("_Blend");
+        private static readonly int SrcBlendId = Shader.PropertyToID("_SrcBlend");
+        private static readonly int DstBlendId = Shader.PropertyToID("_DstBlend");
+        private static readonly int SrcBlendAlphaId = Shader.PropertyToID("_SrcBlendAlpha");
+        private static readonly int DstBlendAlphaId = Shader.PropertyToID("_DstBlendAlpha");
+        private static readonly int ZWriteId = Shader.PropertyToID("_ZWrite");
+
         private enum ReplacementState
         {
             Searching,
@@ -26,9 +37,41 @@ namespace AR80sRetro
             public int ConfirmedFrames;
             public int PendingMoveFrames;
             public float LastSeenTime;
+            public float LastObservationConfidence = 1f;
+            public float TrackingConfidenceThreshold;
+            public float CurrentOpacity = 1f;
             public bool HasMoveTarget;
             public int LastMatchedFrame = -1;
             public ReplacementState State = ReplacementState.Searching;
+            public List<RuntimeMaterialState> FadeMaterials;
+        }
+
+        private sealed class RuntimeMaterialState
+        {
+            public Material Material;
+            public bool HasBaseColor;
+            public Color BaseColor;
+            public bool HasColor;
+            public Color Color;
+            public bool HasSurface;
+            public float Surface;
+            public bool HasBlend;
+            public float Blend;
+            public bool HasSrcBlend;
+            public float SrcBlend;
+            public bool HasDstBlend;
+            public float DstBlend;
+            public bool HasSrcBlendAlpha;
+            public float SrcBlendAlpha;
+            public bool HasDstBlendAlpha;
+            public float DstBlendAlpha;
+            public bool HasZWrite;
+            public float ZWrite;
+            public int RenderQueue;
+            public string RenderType;
+            public bool SurfaceTransparentKeyword;
+            public bool AlphaPremultiplyKeyword;
+            public bool ShadowCasterPassEnabled;
         }
 
         [SerializeField] private RetroPrefabLibrary prefabLibrary;
@@ -44,6 +87,14 @@ namespace AR80sRetro
         [SerializeField, Min(1)] private int movementConfirmationFrames = 3;
         [SerializeField, Min(0.01f)] private float movementSmoothTime = 0.25f;
 
+        [Header("Depth Occlusion Fallback")]
+        [SerializeField] private ARDepthFrameProvider depthProvider;
+        [SerializeField] private bool fadeWhenDepthUnavailable = true;
+        [SerializeField, Min(0f)] private float depthStartupGraceSeconds = 2f;
+        [SerializeField, Min(0f)] private float fallbackFadeDelaySeconds = 0.35f;
+        [SerializeField, Min(0.05f)] private float fallbackFadeDurationSeconds = 0.35f;
+        [SerializeField, Range(0f, 1f)] private float fallbackMinimumOpacity = 0.2f;
+
         private readonly List<TrackedReplacement> trackedReplacements = new List<TrackedReplacement>();
 
         private void Awake()
@@ -52,11 +103,17 @@ namespace AR80sRetro
             {
                 arCamera = Camera.main;
             }
+
+            if (depthProvider == null)
+            {
+                depthProvider = FindObjectOfType<ARDepthFrameProvider>();
+            }
         }
 
         private void Reset()
         {
             positionSolver = FindObjectOfType<ARRaycastPositionSolver>();
+            depthProvider = FindObjectOfType<ARDepthFrameProvider>();
             arCamera = Camera.main;
             contentRoot = transform;
         }
@@ -65,6 +122,7 @@ namespace AR80sRetro
         {
             UpdateLostStates();
             SmoothActiveMoves();
+            UpdateFallbackVisibility();
             RemoveExpiredReplacements();
         }
 
@@ -85,7 +143,7 @@ namespace AR80sRetro
                 }
 
                 string key = rule.DetectionLabel.ToLowerInvariant();
-                if (!detection.IsValid(rule.TrackingMinConfidence))
+                if (!detection.IsValid(0f))
                 {
                     continue;
                 }
@@ -105,6 +163,13 @@ namespace AR80sRetro
                     : rule.MinConfidence;
                 if (!detection.IsValid(requiredConfidence))
                 {
+                    if (hasLockedInstance)
+                    {
+                        tracked.LastMatchedFrame = Time.frameCount;
+                        tracked.LastObservationConfidence = detection.Confidence;
+                        tracked.TrackingConfidenceThreshold = rule.TrackingMinConfidence;
+                    }
+
                     continue;
                 }
 
@@ -118,6 +183,8 @@ namespace AR80sRetro
                 }
 
                 tracked.LastMatchedFrame = Time.frameCount;
+                tracked.LastObservationConfidence = detection.Confidence;
+                tracked.TrackingConfidenceThreshold = rule.TrackingMinConfidence;
                 UpdateReplacement(rule, detection, pose, now, tracked);
             }
         }
@@ -234,6 +301,304 @@ namespace AR80sRetro
                     tracked.MoveVelocity = Vector3.zero;
                     tracked.State = ReplacementState.Locked;
                 }
+            }
+        }
+
+        private void UpdateFallbackVisibility()
+        {
+            bool depthCanRenderOcclusion = depthProvider != null
+                && depthProvider.IsEnvironmentDepthUsable;
+            bool useFallback = fadeWhenDepthUnavailable
+                && !depthCanRenderOcclusion
+                && Time.timeSinceLevelLoad >= depthStartupGraceSeconds;
+            float minimumOpacity = Mathf.Clamp01(fallbackMinimumOpacity);
+            float fadeSpeed = Mathf.Max(
+                0.01f,
+                (1f - minimumOpacity) / Mathf.Max(0.05f, fallbackFadeDurationSeconds));
+            float now = Time.time;
+
+            for (int i = 0; i < trackedReplacements.Count; i++)
+            {
+                TrackedReplacement tracked = trackedReplacements[i];
+                if (tracked.Instance == null)
+                {
+                    continue;
+                }
+
+                float targetOpacity = 1f;
+                if (useFallback)
+                {
+                    float secondsSinceConfidentDetection = now - tracked.LastSeenTime;
+                    float lostProgress = Mathf.InverseLerp(
+                        fallbackFadeDelaySeconds,
+                        fallbackFadeDelaySeconds + fallbackFadeDurationSeconds,
+                        secondsSinceConfidentDetection);
+                    targetOpacity = Mathf.Lerp(1f, minimumOpacity, lostProgress);
+
+                    if (tracked.TrackingConfidenceThreshold > 0f
+                        && tracked.LastObservationConfidence < tracked.TrackingConfidenceThreshold)
+                    {
+                        float confidenceRatio = Mathf.Clamp01(
+                            tracked.LastObservationConfidence / tracked.TrackingConfidenceThreshold);
+                        float confidenceOpacity = Mathf.Lerp(
+                            minimumOpacity,
+                            1f,
+                            confidenceRatio);
+                        targetOpacity = Mathf.Min(targetOpacity, confidenceOpacity);
+                    }
+                }
+
+                float nextOpacity = Mathf.MoveTowards(
+                    tracked.CurrentOpacity,
+                    targetOpacity,
+                    fadeSpeed * Time.deltaTime);
+                ApplyOpacity(tracked, nextOpacity);
+            }
+        }
+
+        private static void ApplyOpacity(TrackedReplacement tracked, float opacity)
+        {
+            opacity = Mathf.Clamp01(opacity);
+            if (Mathf.Approximately(tracked.CurrentOpacity, opacity))
+            {
+                return;
+            }
+
+            if (tracked.FadeMaterials == null)
+            {
+                CaptureFadeMaterials(tracked);
+            }
+
+            if (tracked.FadeMaterials == null)
+            {
+                tracked.CurrentOpacity = opacity;
+                return;
+            }
+
+            bool transparent = opacity < 0.999f;
+            for (int i = 0; i < tracked.FadeMaterials.Count; i++)
+            {
+                RuntimeMaterialState state = tracked.FadeMaterials[i];
+                Material material = state.Material;
+                if (material == null)
+                {
+                    continue;
+                }
+
+                if (transparent)
+                {
+                    ConfigureTransparent(material, state);
+                }
+                else
+                {
+                    RestoreSurfaceState(material, state);
+                }
+
+                if (state.HasBaseColor)
+                {
+                    Color color = state.BaseColor;
+                    color.a *= opacity;
+                    material.SetColor(BaseColorId, color);
+                }
+
+                if (state.HasColor)
+                {
+                    Color color = state.Color;
+                    color.a *= opacity;
+                    material.SetColor(ColorId, color);
+                }
+            }
+
+            tracked.CurrentOpacity = opacity;
+        }
+
+        private static void CaptureFadeMaterials(TrackedReplacement tracked)
+        {
+            if (tracked.Instance == null)
+            {
+                return;
+            }
+
+            tracked.FadeMaterials = new List<RuntimeMaterialState>();
+            HashSet<Material> capturedMaterials = new HashSet<Material>();
+            Renderer[] renderers = tracked.Instance.GetComponentsInChildren<Renderer>(true);
+            for (int rendererIndex = 0; rendererIndex < renderers.Length; rendererIndex++)
+            {
+                Material[] materials = renderers[rendererIndex].materials;
+                for (int materialIndex = 0; materialIndex < materials.Length; materialIndex++)
+                {
+                    Material material = materials[materialIndex];
+                    if (material == null || !capturedMaterials.Add(material))
+                    {
+                        continue;
+                    }
+
+                    RuntimeMaterialState state = new RuntimeMaterialState
+                    {
+                        Material = material,
+                        HasBaseColor = material.HasProperty(BaseColorId),
+                        HasColor = material.HasProperty(ColorId),
+                        HasSurface = material.HasProperty(SurfaceId),
+                        HasBlend = material.HasProperty(BlendId),
+                        HasSrcBlend = material.HasProperty(SrcBlendId),
+                        HasDstBlend = material.HasProperty(DstBlendId),
+                        HasSrcBlendAlpha = material.HasProperty(SrcBlendAlphaId),
+                        HasDstBlendAlpha = material.HasProperty(DstBlendAlphaId),
+                        HasZWrite = material.HasProperty(ZWriteId),
+                        RenderQueue = material.renderQueue,
+                        RenderType = material.GetTag("RenderType", false, string.Empty),
+                        SurfaceTransparentKeyword = material.IsKeywordEnabled("_SURFACE_TYPE_TRANSPARENT"),
+                        AlphaPremultiplyKeyword = material.IsKeywordEnabled("_ALPHAPREMULTIPLY_ON"),
+                        ShadowCasterPassEnabled = material.GetShaderPassEnabled("ShadowCaster")
+                    };
+
+                    if (state.HasBaseColor)
+                    {
+                        state.BaseColor = material.GetColor(BaseColorId);
+                    }
+
+                    if (state.HasColor)
+                    {
+                        state.Color = material.GetColor(ColorId);
+                    }
+
+                    if (state.HasSurface)
+                    {
+                        state.Surface = material.GetFloat(SurfaceId);
+                    }
+
+                    if (state.HasBlend)
+                    {
+                        state.Blend = material.GetFloat(BlendId);
+                    }
+
+                    if (state.HasSrcBlend)
+                    {
+                        state.SrcBlend = material.GetFloat(SrcBlendId);
+                    }
+
+                    if (state.HasDstBlend)
+                    {
+                        state.DstBlend = material.GetFloat(DstBlendId);
+                    }
+
+                    if (state.HasSrcBlendAlpha)
+                    {
+                        state.SrcBlendAlpha = material.GetFloat(SrcBlendAlphaId);
+                    }
+
+                    if (state.HasDstBlendAlpha)
+                    {
+                        state.DstBlendAlpha = material.GetFloat(DstBlendAlphaId);
+                    }
+
+                    if (state.HasZWrite)
+                    {
+                        state.ZWrite = material.GetFloat(ZWriteId);
+                    }
+
+                    tracked.FadeMaterials.Add(state);
+                }
+            }
+        }
+
+        private static void ConfigureTransparent(Material material, RuntimeMaterialState state)
+        {
+            material.SetOverrideTag("RenderType", "Transparent");
+            if (state.HasSurface)
+            {
+                material.SetFloat(SurfaceId, 1f);
+            }
+
+            if (state.HasBlend)
+            {
+                material.SetFloat(BlendId, 0f);
+            }
+
+            if (state.HasSrcBlend)
+            {
+                material.SetFloat(SrcBlendId, (float)BlendMode.SrcAlpha);
+            }
+
+            if (state.HasDstBlend)
+            {
+                material.SetFloat(DstBlendId, (float)BlendMode.OneMinusSrcAlpha);
+            }
+
+            if (state.HasSrcBlendAlpha)
+            {
+                material.SetFloat(SrcBlendAlphaId, (float)BlendMode.One);
+            }
+
+            if (state.HasDstBlendAlpha)
+            {
+                material.SetFloat(DstBlendAlphaId, (float)BlendMode.OneMinusSrcAlpha);
+            }
+
+            if (state.HasZWrite)
+            {
+                material.SetFloat(ZWriteId, 0f);
+            }
+
+            material.EnableKeyword("_SURFACE_TYPE_TRANSPARENT");
+            material.DisableKeyword("_ALPHAPREMULTIPLY_ON");
+            material.renderQueue = (int)RenderQueue.Transparent;
+            material.SetShaderPassEnabled("ShadowCaster", false);
+        }
+
+        private static void RestoreSurfaceState(Material material, RuntimeMaterialState state)
+        {
+            material.SetOverrideTag("RenderType", state.RenderType);
+            if (state.HasSurface)
+            {
+                material.SetFloat(SurfaceId, state.Surface);
+            }
+
+            if (state.HasBlend)
+            {
+                material.SetFloat(BlendId, state.Blend);
+            }
+
+            if (state.HasSrcBlend)
+            {
+                material.SetFloat(SrcBlendId, state.SrcBlend);
+            }
+
+            if (state.HasDstBlend)
+            {
+                material.SetFloat(DstBlendId, state.DstBlend);
+            }
+
+            if (state.HasSrcBlendAlpha)
+            {
+                material.SetFloat(SrcBlendAlphaId, state.SrcBlendAlpha);
+            }
+
+            if (state.HasDstBlendAlpha)
+            {
+                material.SetFloat(DstBlendAlphaId, state.DstBlendAlpha);
+            }
+
+            if (state.HasZWrite)
+            {
+                material.SetFloat(ZWriteId, state.ZWrite);
+            }
+
+            SetKeyword(material, "_SURFACE_TYPE_TRANSPARENT", state.SurfaceTransparentKeyword);
+            SetKeyword(material, "_ALPHAPREMULTIPLY_ON", state.AlphaPremultiplyKeyword);
+            material.renderQueue = state.RenderQueue;
+            material.SetShaderPassEnabled("ShadowCaster", state.ShadowCasterPassEnabled);
+        }
+
+        private static void SetKeyword(Material material, string keyword, bool enabled)
+        {
+            if (enabled)
+            {
+                material.EnableKeyword(keyword);
+            }
+            else
+            {
+                material.DisableKeyword(keyword);
             }
         }
 
@@ -444,6 +809,7 @@ namespace AR80sRetro
 
                 if (tracked.Instance == null)
                 {
+                    ReleaseFadeMaterials(tracked);
                     trackedReplacements.RemoveAt(i);
                     continue;
                 }
@@ -453,9 +819,38 @@ namespace AR80sRetro
                     continue;
                 }
 
+                ReleaseFadeMaterials(tracked);
                 Destroy(tracked.Instance);
 
                 trackedReplacements.RemoveAt(i);
+            }
+        }
+
+        private static void ReleaseFadeMaterials(TrackedReplacement tracked)
+        {
+            if (tracked.FadeMaterials == null)
+            {
+                return;
+            }
+
+            for (int i = 0; i < tracked.FadeMaterials.Count; i++)
+            {
+                Material material = tracked.FadeMaterials[i].Material;
+                if (material != null)
+                {
+                    Object.Destroy(material);
+                }
+            }
+
+            tracked.FadeMaterials.Clear();
+            tracked.FadeMaterials = null;
+        }
+
+        private void OnDestroy()
+        {
+            for (int i = 0; i < trackedReplacements.Count; i++)
+            {
+                ReleaseFadeMaterials(trackedReplacements[i]);
             }
         }
     }
