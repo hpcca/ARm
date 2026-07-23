@@ -41,6 +41,14 @@ crashlytics-build.properties
 /yolov8n.pt
 /Tools/output/
 
+# Local FoundationPose runtime data and third-party checkout
+/External/FoundationPose/
+/Tools/FoundationPose/weights/
+/Tools/FoundationPose/demo_data/
+/Tools/FoundationPose/scans/
+/Tools/FoundationPose/results/
+/Tools/FoundationPose/.env
+
 # Builds and packages
 *.apk
 *.aab
