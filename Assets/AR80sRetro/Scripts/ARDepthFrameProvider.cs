@@ -17,15 +17,22 @@ namespace AR80sRetro
         [SerializeField, Range(0f, 1f)] private float minDepthMeters = 0.15f;
         [SerializeField, Range(1f, 20f)] private float maxDepthMeters = 8f;
         [SerializeField, Range(0, 255)] private int minConfidence = 1;
+        [SerializeField, Min(0f)] private float depthAvailabilityGraceSeconds = 0.5f;
         [SerializeField] private bool flipDepthX;
         [SerializeField] private bool flipDepthY = true;
         [SerializeField] private bool logDepthAvailability;
 
         private readonly List<float> depthSamples = new List<float>(25);
         private int lastAvailabilityLogFrame = -120;
+        private float lastDepthTextureTime = float.NegativeInfinity;
 
-        public bool IsDepthActive => occlusionManager != null
-            && occlusionManager.currentEnvironmentDepthMode != EnvironmentDepthMode.Disabled;
+        public bool IsDepthActive => IsEnvironmentDepthUsable;
+
+        public bool IsEnvironmentDepthSupported => occlusionManager != null
+            && occlusionManager.descriptor != null
+            && occlusionManager.descriptor.environmentDepthImageSupported == Supported.Supported;
+
+        public bool IsEnvironmentDepthUsable { get; private set; }
 
         private void Awake()
         {
@@ -33,22 +40,40 @@ namespace AR80sRetro
             {
                 arCamera = Camera.main;
             }
+
+            if (occlusionManager == null && arCamera != null)
+            {
+                occlusionManager = arCamera.GetComponent<AROcclusionManager>();
+            }
+
+            if (occlusionManager != null
+                && arCamera != null
+                && occlusionManager.gameObject != arCamera.gameObject)
+            {
+                Debug.LogWarning(
+                    "AROcclusionManager must be on the same GameObject as the AR Camera and ARCameraBackground for render occlusion.",
+                    this);
+            }
         }
 
         private void Reset()
         {
-            occlusionManager = FindObjectOfType<AROcclusionManager>();
             arCamera = Camera.main;
+            occlusionManager = arCamera != null
+                ? arCamera.GetComponent<AROcclusionManager>()
+                : FindObjectOfType<AROcclusionManager>();
         }
 
         private void OnEnable()
         {
             ApplyDepthSettings();
+            UpdateDepthAvailability();
         }
 
         private void Update()
         {
             ApplyDepthSettings();
+            UpdateDepthAvailability();
         }
 
         public bool TrySampleWorldPoint(
@@ -98,6 +123,31 @@ namespace AR80sRetro
             {
                 occlusionManager.environmentDepthTemporalSmoothingRequested = requestTemporalSmoothing;
             }
+
+            if (occlusionManager.requestedOcclusionPreferenceMode
+                != OcclusionPreferenceMode.PreferEnvironmentOcclusion)
+            {
+                occlusionManager.requestedOcclusionPreferenceMode =
+                    OcclusionPreferenceMode.PreferEnvironmentOcclusion;
+            }
+        }
+
+        private void UpdateDepthAvailability()
+        {
+            bool subsystemCanProvideDepth = IsEnvironmentDepthSupported
+                && occlusionManager.enabled
+                && occlusionManager.gameObject.activeInHierarchy
+                && occlusionManager.currentEnvironmentDepthMode != EnvironmentDepthMode.Disabled;
+            bool hasCurrentTexture = subsystemCanProvideDepth
+                && occlusionManager.environmentDepthTexture != null;
+            if (hasCurrentTexture)
+            {
+                lastDepthTextureTime = Time.unscaledTime;
+            }
+
+            IsEnvironmentDepthUsable = hasCurrentTexture
+                || (subsystemCanProvideDepth
+                    && Time.unscaledTime - lastDepthTextureTime <= depthAvailabilityGraceSeconds);
         }
 
         private bool TrySampleDepthMeters(
