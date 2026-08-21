@@ -1,5 +1,6 @@
 using System;
 using System.Collections.Generic;
+using AR80sRetro.Experiments;
 using Unity.Collections;
 using UnityEngine;
 using UnityEngine.XR.ARFoundation;
@@ -22,6 +23,9 @@ namespace AR80sRetro
         [SerializeField] private bool flipDepthY = true;
         [SerializeField] private bool logDepthAvailability;
 
+        [Header("Experiment")]
+        [SerializeField] private ARReplacementExperimentConfig experimentConfig;
+
         private readonly List<float> depthSamples = new List<float>(25);
         private int lastAvailabilityLogFrame = -120;
         private float lastDepthTextureTime = float.NegativeInfinity;
@@ -33,6 +37,14 @@ namespace AR80sRetro
             && occlusionManager.descriptor.environmentDepthImageSupported == Supported.Supported;
 
         public bool IsEnvironmentDepthUsable { get; private set; }
+        public EnvironmentDepthMode ConfiguredDepthMode => requestedDepthMode;
+        public bool TemporalSmoothingRequested => requestTemporalSmoothing;
+        public int SampleGridSize => sampleRadiusNormalized > 0f ? 5 : 1;
+        public float SampleRadiusNormalized => sampleRadiusNormalized;
+        public float MinimumDepthMeters => minDepthMeters;
+        public float MaximumDepthMeters => maxDepthMeters;
+        public int MinimumConfidence => minConfidence;
+        public float DepthAvailabilityGraceSeconds => depthAvailabilityGraceSeconds;
 
         private void Awake()
         {
@@ -83,19 +95,59 @@ namespace AR80sRetro
             out float depthMeters,
             out float confidence)
         {
+            return TrySampleWorldPoint(
+                detection,
+                normalizedAnchorInBox,
+                out worldPoint,
+                out depthMeters,
+                out confidence,
+                out _);
+        }
+
+        public bool TrySampleWorldPoint(
+            DetectionResult detection,
+            Vector2 normalizedAnchorInBox,
+            out Vector3 worldPoint,
+            out float depthMeters,
+            out float confidence,
+            out DepthSampleDiagnostics diagnostics)
+        {
+            long startTimestamp = ExperimentClock.Timestamp();
             worldPoint = default;
             depthMeters = 0f;
             confidence = 0f;
 
             if (occlusionManager == null || arCamera == null)
             {
+                diagnostics = new DepthSampleDiagnostics(
+                    true,
+                    false,
+                    false,
+                    0,
+                    0f,
+                    0f,
+                    ExperimentClock.ElapsedMilliseconds(startTimestamp));
                 return false;
             }
 
             Vector2 screenPoint = detection.ToScreenPoint(Screen.width, Screen.height, normalizedAnchorInBox);
-            if (!TrySampleDepthMeters(detection, normalizedAnchorInBox, out depthMeters, out confidence))
+            if (!TrySampleDepthMeters(
+                    detection,
+                    normalizedAnchorInBox,
+                    out depthMeters,
+                    out confidence,
+                    out int validSampleCount,
+                    out bool confidenceAvailable))
             {
                 MaybeLogDepthUnavailable();
+                diagnostics = new DepthSampleDiagnostics(
+                    true,
+                    false,
+                    confidenceAvailable,
+                    validSampleCount,
+                    0f,
+                    0f,
+                    ExperimentClock.ElapsedMilliseconds(startTimestamp));
                 return false;
             }
 
@@ -104,6 +156,14 @@ namespace AR80sRetro
                 Mathf.Clamp01(screenPoint.y / Mathf.Max(1f, Screen.height)),
                 depthMeters);
             worldPoint = arCamera.ViewportToWorldPoint(viewportPoint);
+            diagnostics = new DepthSampleDiagnostics(
+                true,
+                true,
+                confidenceAvailable,
+                validSampleCount,
+                depthMeters,
+                confidence,
+                ExperimentClock.ElapsedMilliseconds(startTimestamp));
             return true;
         }
 
@@ -114,9 +174,15 @@ namespace AR80sRetro
                 return;
             }
 
-            if (occlusionManager.requestedEnvironmentDepthMode != requestedDepthMode)
+            bool requiresEnvironmentDepth = experimentConfig == null
+                || experimentConfig.DepthPositionFusionEnabled
+                || experimentConfig.OcclusionFadeFallbackEnabled;
+            EnvironmentDepthMode effectiveDepthMode = requiresEnvironmentDepth
+                ? requestedDepthMode
+                : EnvironmentDepthMode.Disabled;
+            if (occlusionManager.requestedEnvironmentDepthMode != effectiveDepthMode)
             {
-                occlusionManager.requestedEnvironmentDepthMode = requestedDepthMode;
+                occlusionManager.requestedEnvironmentDepthMode = effectiveDepthMode;
             }
 
             if (occlusionManager.environmentDepthTemporalSmoothingRequested != requestTemporalSmoothing)
@@ -124,11 +190,13 @@ namespace AR80sRetro
                 occlusionManager.environmentDepthTemporalSmoothingRequested = requestTemporalSmoothing;
             }
 
-            if (occlusionManager.requestedOcclusionPreferenceMode
-                != OcclusionPreferenceMode.PreferEnvironmentOcclusion)
+            OcclusionPreferenceMode effectiveOcclusionMode = experimentConfig == null
+                || experimentConfig.OcclusionFadeFallbackEnabled
+                ? OcclusionPreferenceMode.PreferEnvironmentOcclusion
+                : OcclusionPreferenceMode.NoOcclusion;
+            if (occlusionManager.requestedOcclusionPreferenceMode != effectiveOcclusionMode)
             {
-                occlusionManager.requestedOcclusionPreferenceMode =
-                    OcclusionPreferenceMode.PreferEnvironmentOcclusion;
+                occlusionManager.requestedOcclusionPreferenceMode = effectiveOcclusionMode;
             }
         }
 
@@ -154,10 +222,14 @@ namespace AR80sRetro
             DetectionResult detection,
             Vector2 normalizedAnchorInBox,
             out float medianDepth,
-            out float medianConfidence)
+            out float medianConfidence,
+            out int validSampleCount,
+            out bool confidenceAvailable)
         {
             medianDepth = 0f;
             medianConfidence = 0f;
+            validSampleCount = 0;
+            confidenceAvailable = false;
             depthSamples.Clear();
 
             if (!occlusionManager.TryAcquireEnvironmentDepthCpuImage(out XRCpuImage depthImage))
@@ -167,6 +239,7 @@ namespace AR80sRetro
 
             bool hasConfidenceImage = occlusionManager.TryAcquireEnvironmentDepthConfidenceCpuImage(
                 out XRCpuImage confidenceImage);
+            confidenceAvailable = hasConfidenceImage;
 
             try
             {
@@ -219,6 +292,7 @@ namespace AR80sRetro
                 }
 
                 depthSamples.Sort();
+                validSampleCount = depthSamples.Count;
                 medianDepth = depthSamples[depthSamples.Count / 2];
                 medianConfidence = confidenceCount > 0 ? confidenceSum / confidenceCount : 0f;
                 return true;

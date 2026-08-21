@@ -8,6 +8,8 @@ namespace AR80sRetro
     {
         [SerializeField] private List<RetroReplacementRule> rules = new List<RetroReplacementRule>();
 
+        public IReadOnlyList<RetroReplacementRule> Rules => rules;
+
         public bool TryGetRule(string detectionLabel, out RetroReplacementRule rule)
         {
             rule = null;

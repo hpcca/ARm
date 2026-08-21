@@ -1,6 +1,7 @@
 using System;
 using System.Collections.Generic;
 using System.Text;
+using AR80sRetro.Experiments;
 using Unity.Sentis;
 using UnityEngine;
 
@@ -79,6 +80,16 @@ namespace AR80sRetro
         [SerializeField, Min(1)] private int diagnosticLogInterval = 10;
 
         public event Action<IReadOnlyList<DetectionResult>> DetectionsReady;
+        public event Action<DetectionCycleDiagnostics> InferenceCycleFailed;
+
+        public DetectionCycleDiagnostics LastCycleDiagnostics { get; private set; }
+        public BackendType ConfiguredBackend => worker != null ? activeBackendType : backendType;
+        public int InputWidth => InputSize;
+        public int InputHeight => InputSize;
+        public float InferenceIntervalSeconds => inferenceIntervalSeconds;
+        public float ConfidenceThreshold => confidenceThreshold;
+        public float IouThreshold => iouThreshold;
+        public int MaxDetections => maxDetections;
 
         private readonly List<Candidate> candidates = new List<Candidate>(64);
         private readonly List<Candidate> selectedCandidates = new List<Candidate>(16);
@@ -91,6 +102,8 @@ namespace AR80sRetro
         private bool hasLoggedOutputShape;
         private bool initializationFailed;
         private int inferenceCount;
+        private long experimentFrameId;
+        private BackendType activeBackendType;
 
         private void Reset()
         {
@@ -111,12 +124,45 @@ namespace AR80sRetro
 
             nextInferenceTime = Time.time + inferenceIntervalSeconds;
 
-            if (!TryInitialize() || !frameProvider.TryUpdateFrame())
+            long cycleStartTimestamp = ExperimentClock.Timestamp();
+            long frameId = ++experimentFrameId;
+            long timestampMs = DateTimeOffset.UtcNow.ToUnixTimeMilliseconds();
+
+            if (!TryInitialize())
             {
+                PublishCycleFailure(
+                    frameId,
+                    timestampMs,
+                    cycleStartTimestamp,
+                    0f,
+                    0f,
+                    0f,
+                    "detector_not_initialized");
                 return;
             }
 
-            RunInference(frameProvider.CameraTexture);
+            long captureStartTimestamp = ExperimentClock.Timestamp();
+            bool frameCaptured = frameProvider.TryUpdateFrame();
+            float captureLatencyMs = ExperimentClock.ElapsedMilliseconds(captureStartTimestamp);
+            if (!frameCaptured)
+            {
+                PublishCycleFailure(
+                    frameId,
+                    timestampMs,
+                    cycleStartTimestamp,
+                    captureLatencyMs,
+                    0f,
+                    0f,
+                    "camera_frame_unavailable");
+                return;
+            }
+
+            RunInference(
+                frameProvider.CameraTexture,
+                frameId,
+                timestampMs,
+                cycleStartTimestamp,
+                captureLatencyMs);
         }
 
         private bool TryInitialize()
@@ -146,6 +192,7 @@ namespace AR80sRetro
                     Debug.LogWarning("Compute shaders are unavailable. YOLO is using the CPU backend.", this);
                 }
 
+                activeBackendType = selectedBackend;
                 worker = new Worker(runtimeModel, selectedBackend);
                 inputTensor = new Tensor<float>(new TensorShape(1, 3, InputSize, InputSize));
                 Debug.Log($"YOLO initialized with {selectedBackend} backend.", this);
@@ -159,8 +206,16 @@ namespace AR80sRetro
             }
         }
 
-        private void RunInference(Texture2D cameraTexture)
+        private void RunInference(
+            Texture2D cameraTexture,
+            long frameId,
+            long timestampMs,
+            long cycleStartTimestamp,
+            float captureLatencyMs)
         {
+            long yoloStartTimestamp = ExperimentClock.Timestamp();
+            float outputReadbackLatencyMs = 0f;
+
             try
             {
                 TextureTransform transform = new TextureTransform()
@@ -175,11 +230,23 @@ namespace AR80sRetro
                 if (output == null)
                 {
                     Debug.LogError("YOLO output is not a float tensor.", this);
+                    PublishCycleFailure(
+                        frameId,
+                        timestampMs,
+                        cycleStartTimestamp,
+                        captureLatencyMs,
+                        ExperimentClock.ElapsedMilliseconds(yoloStartTimestamp),
+                        outputReadbackLatencyMs,
+                        "yolo_output_not_float_tensor");
                     return;
                 }
 
+                long readbackStartTimestamp = ExperimentClock.Timestamp();
                 using (Tensor<float> cpuOutput = output.ReadbackAndClone())
                 {
+                    outputReadbackLatencyMs = ExperimentClock.ElapsedMilliseconds(
+                        readbackStartTimestamp);
+
                     if (!hasLoggedOutputShape)
                     {
                         hasLoggedOutputShape = true;
@@ -190,12 +257,50 @@ namespace AR80sRetro
                 }
 
                 inferenceCount++;
+                LastCycleDiagnostics = new DetectionCycleDiagnostics(
+                    frameId,
+                    timestampMs,
+                    cycleStartTimestamp,
+                    captureLatencyMs,
+                    ExperimentClock.ElapsedMilliseconds(yoloStartTimestamp),
+                    outputReadbackLatencyMs,
+                    true,
+                    string.Empty);
                 DetectionsReady?.Invoke(detectionResults);
             }
             catch (Exception exception)
             {
                 Debug.LogException(exception, this);
+                PublishCycleFailure(
+                    frameId,
+                    timestampMs,
+                    cycleStartTimestamp,
+                    captureLatencyMs,
+                    ExperimentClock.ElapsedMilliseconds(yoloStartTimestamp),
+                    outputReadbackLatencyMs,
+                    "yolo_inference_exception");
             }
+        }
+
+        private void PublishCycleFailure(
+            long frameId,
+            long timestampMs,
+            long cycleStartTimestamp,
+            float captureLatencyMs,
+            float yoloLatencyMs,
+            float outputReadbackLatencyMs,
+            string failureReason)
+        {
+            LastCycleDiagnostics = new DetectionCycleDiagnostics(
+                frameId,
+                timestampMs,
+                cycleStartTimestamp,
+                captureLatencyMs,
+                yoloLatencyMs,
+                outputReadbackLatencyMs,
+                false,
+                failureReason);
+            InferenceCycleFailed?.Invoke(LastCycleDiagnostics);
         }
 
         private void ParseTargetDetections(Tensor<float> output)

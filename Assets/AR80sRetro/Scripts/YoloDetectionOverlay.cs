@@ -1,4 +1,5 @@
 using System.Collections.Generic;
+using AR80sRetro.Experiments;
 using UnityEngine;
 
 namespace AR80sRetro
@@ -6,6 +7,7 @@ namespace AR80sRetro
     public sealed class YoloDetectionOverlay : MonoBehaviour
     {
         [SerializeField] private YoloObjectDetector detector;
+        [SerializeField] private ARReplacementExperimentConfig experimentConfig;
         [SerializeField] private Color boxColor = Color.green;
         [SerializeField, Min(1f)] private float lineThickness = 4f;
 
@@ -49,6 +51,11 @@ namespace AR80sRetro
 
         private void OnGUI()
         {
+            if (experimentConfig != null && !experimentConfig.DebugOverlayEnabled)
+            {
+                return;
+            }
+
             EnsureStyle();
 
             Color previousColor = GUI.color;

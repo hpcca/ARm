@@ -6200,6 +6200,8 @@ GameObject:
   - component: {fileID: 1702211331}
   - component: {fileID: 1702211330}
   - component: {fileID: 1702211334}
+  - component: {fileID: 1702211336}
+  - component: {fileID: 1702211335}
   m_Layer: 0
   m_Name: AR80sRetro System
   m_TagString: Untagged
@@ -6258,6 +6260,7 @@ MonoBehaviour:
   fallbackFadeDelaySeconds: 0.35
   fallbackFadeDurationSeconds: 0.35
   fallbackMinimumOpacity: 0.2
+  experimentConfig: {fileID: 1702211336}
 --- !u!114 &1702211326
 MonoBehaviour:
   m_ObjectHideFlags: 0
@@ -6278,6 +6281,7 @@ MonoBehaviour:
   faceCamera: 0
   depthHorizontalWeight: 0.75
   maxDepthPlaneHorizontalDeltaMeters: 0.6
+  experimentConfig: {fileID: 1702211336}
 --- !u!4 &1702211327
 Transform:
   m_ObjectHideFlags: 0
@@ -6339,6 +6343,7 @@ MonoBehaviour:
   m_Name: 
   m_EditorClassIdentifier: 
   detector: {fileID: 1702211332}
+  experimentConfig: {fileID: 1702211336}
   boxColor: {r: 0, g: 1, b: 0, a: 1}
   lineThickness: 4
 --- !u!114 &1702211331
@@ -6355,6 +6360,7 @@ MonoBehaviour:
   m_EditorClassIdentifier: 
   detector: {fileID: 1702211332}
   replacementManager: {fileID: 1702211325}
+  experimentConfig: {fileID: 1702211336}
 --- !u!114 &1702211332
 MonoBehaviour:
   m_ObjectHideFlags: 0
@@ -6417,6 +6423,59 @@ MonoBehaviour:
   flipDepthX: 0
   flipDepthY: 1
   logDepthAvailability: 0
+  experimentConfig: {fileID: 1702211336}
+--- !u!114 &1702211335
+MonoBehaviour:
+  m_ObjectHideFlags: 0
+  m_CorrespondingSourceObject: {fileID: 0}
+  m_PrefabInstance: {fileID: 0}
+  m_PrefabAsset: {fileID: 0}
+  m_GameObject: {fileID: 1702211323}
+  m_Enabled: 1
+  m_EditorHideFlags: 0
+  m_Script: {fileID: 11500000, guid: 2c3ef46c7208f5843a090b846067d27f, type: 3}
+  m_Name:
+  m_EditorClassIdentifier:
+  experimentConfig: {fileID: 1702211336}
+  pipeline: {fileID: 1702211331}
+  detector: {fileID: 1702211332}
+  depthProvider: {fileID: 1702211334}
+  positionSolver: {fileID: 1702211326}
+  replacementManager: {fileID: 1702211325}
+  recordsPerBatch: 128
+  flushIntervalSeconds: 2
+--- !u!114 &1702211336
+MonoBehaviour:
+  m_ObjectHideFlags: 0
+  m_CorrespondingSourceObject: {fileID: 0}
+  m_PrefabInstance: {fileID: 0}
+  m_PrefabAsset: {fileID: 0}
+  m_GameObject: {fileID: 1702211323}
+  m_Enabled: 1
+  m_EditorHideFlags: 0
+  m_Script: {fileID: 11500000, guid: faf08b13621a4b348a9e6396b97de166, type: 3}
+  m_Name:
+  m_EditorClassIdentifier:
+  session:
+    sessionId:
+    trialId: trial_001
+    objectId: object_001
+    expectedObjectCount: 1
+    sceneId: scene_001
+    conditionId: baseline
+    distanceCondition: 1.0m
+    viewCondition: frontal
+    occlusionPercent: 0
+    lightingCondition: normal
+    buildCommitSha:
+    yoloModelIdentifier: yolov8n-coco-640
+    sceneDescription:
+  ablationMode: 3
+  customDepthPositionFusion: 1
+  customTemporalTracking: 1
+  customOcclusionFadeFallback: 1
+  debugOverlayEnabled: 1
+  loggingEnabled: 0
 --- !u!1 &1756045394
 GameObject:
   m_ObjectHideFlags: 0

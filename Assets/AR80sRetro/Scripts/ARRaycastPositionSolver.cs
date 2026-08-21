@@ -1,4 +1,5 @@
 using System.Collections.Generic;
+using AR80sRetro.Experiments;
 using UnityEngine;
 using UnityEngine.XR.ARFoundation;
 using UnityEngine.XR.ARSubsystems;
@@ -18,6 +19,12 @@ namespace AR80sRetro
         [SerializeField, Range(0f, 1f)] private float depthHorizontalWeight = 0.75f;
         [SerializeField, Min(0.05f)] private float maxDepthPlaneHorizontalDeltaMeters = 0.6f;
 
+        [Header("Experiment")]
+        [SerializeField] private ARReplacementExperimentConfig experimentConfig;
+
+        public float DepthHorizontalWeight => depthHorizontalWeight;
+        public float MaxDepthPlaneHorizontalDeltaMeters => maxDepthPlaneHorizontalDeltaMeters;
+
         private void Reset()
         {
             raycastManager = FindObjectOfType<ARRaycastManager>();
@@ -35,10 +42,31 @@ namespace AR80sRetro
             Vector2 normalizedAnchorInBox,
             out Pose pose)
         {
+            return TrySolvePose(
+                detection,
+                normalizedAnchorInBox,
+                out pose,
+                out _);
+        }
+
+        public bool TrySolvePose(
+            DetectionResult detection,
+            Vector2 normalizedAnchorInBox,
+            out Pose pose,
+            out PositionSolveDiagnostics diagnostics)
+        {
+            long raycastStartTimestamp = ExperimentClock.Timestamp();
             pose = default;
+            diagnostics = new PositionSolveDiagnostics
+            {
+                Depth = new DepthSampleDiagnostics(false, false, false, 0, 0f, 0f, 0f)
+            };
 
             if (raycastManager == null)
             {
+                diagnostics.FailureReason = "raycast_manager_missing";
+                diagnostics.RaycastFusionLatencyMs = ExperimentClock.ElapsedMilliseconds(
+                    raycastStartTimestamp);
                 return false;
             }
 
@@ -54,21 +82,38 @@ namespace AR80sRetro
                 effectiveAnchor);
             if (!raycastManager.Raycast(screenPoint, Hits, trackableTypes))
             {
+                diagnostics.FailureReason = "plane_raycast_failed";
+                diagnostics.RaycastFusionLatencyMs = ExperimentClock.ElapsedMilliseconds(
+                    raycastStartTimestamp);
                 return false;
             }
 
             pose = Hits[0].pose;
             Vector3 planePosition = pose.position;
+            diagnostics.PlaneRaycastSuccess = true;
+            diagnostics.PlanePosition = planePosition;
+            float raycastLatencyMs = ExperimentClock.ElapsedMilliseconds(raycastStartTimestamp);
 
-            if (depthProvider != null
-                && depthHorizontalWeight > 0f
-                && depthProvider.TrySampleWorldPoint(
+            bool depthFusionEnabled = experimentConfig == null
+                || experimentConfig.DepthPositionFusionEnabled;
+            bool hasDepthPoint = false;
+            Vector3 depthWorldPoint = default;
+            if (depthFusionEnabled && depthProvider != null && depthHorizontalWeight > 0f)
+            {
+                hasDepthPoint = depthProvider.TrySampleWorldPoint(
                     detection,
                     new Vector2(0.5f, 0.5f),
-                    out Vector3 depthWorldPoint,
+                    out depthWorldPoint,
                     out _,
-                    out _))
+                    out _,
+                    out DepthSampleDiagnostics depthDiagnostics);
+                diagnostics.Depth = depthDiagnostics;
+            }
+
+            long fusionStartTimestamp = ExperimentClock.Timestamp();
+            if (hasDepthPoint)
             {
+                diagnostics.DepthWorldPosition = depthWorldPoint;
                 Vector2 planeHorizontal = new Vector2(planePosition.x, planePosition.z);
                 Vector2 depthHorizontal = new Vector2(depthWorldPoint.x, depthWorldPoint.z);
                 float horizontalDelta = Vector2.Distance(planeHorizontal, depthHorizontal);
@@ -92,6 +137,9 @@ namespace AR80sRetro
                 }
             }
 
+            diagnostics.FusedPosition = pose.position;
+            diagnostics.RaycastFusionLatencyMs = raycastLatencyMs
+                + ExperimentClock.ElapsedMilliseconds(fusionStartTimestamp);
             return true;
         }
     }

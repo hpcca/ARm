@@ -1,4 +1,5 @@
 using System.Collections.Generic;
+using AR80sRetro.Experiments;
 using UnityEngine;
 using UnityEngine.Rendering;
 
@@ -27,6 +28,7 @@ namespace AR80sRetro
 
         private sealed class TrackedReplacement
         {
+            public int TrackId;
             public string Label;
             public GameObject Instance;
             public Pose LastPose;
@@ -95,7 +97,24 @@ namespace AR80sRetro
         [SerializeField, Min(0.05f)] private float fallbackFadeDurationSeconds = 0.35f;
         [SerializeField, Range(0f, 1f)] private float fallbackMinimumOpacity = 0.2f;
 
+        [Header("Experiment")]
+        [SerializeField] private ARReplacementExperimentConfig experimentConfig;
+
         private readonly List<TrackedReplacement> trackedReplacements = new List<TrackedReplacement>();
+        private int nextTrackId = 1;
+
+        public float LostGraceSeconds => lostGraceSeconds;
+        public float LostStateDelaySeconds => lostStateDelaySeconds;
+        public float ReacquireMatchRadiusMeters => reacquireMatchRadiusMeters;
+        public float DuplicateRadiusMeters => duplicateRadiusMeters;
+        public float MovementDeadZoneMeters => movementDeadZoneMeters;
+        public int MovementConfirmationFrames => movementConfirmationFrames;
+        public float MovementSmoothTimeSeconds => movementSmoothTime;
+        public float DepthStartupGraceSeconds => depthStartupGraceSeconds;
+        public float FallbackFadeDelaySeconds => fallbackFadeDelaySeconds;
+        public float FallbackFadeDurationSeconds => fallbackFadeDurationSeconds;
+        public float FallbackMinimumOpacity => fallbackMinimumOpacity;
+        public RetroPrefabLibrary PrefabLibrary => prefabLibrary;
 
         private void Awake()
         {
@@ -120,56 +139,125 @@ namespace AR80sRetro
 
         private void Update()
         {
-            UpdateLostStates();
-            SmoothActiveMoves();
+            bool temporalTrackingEnabled = experimentConfig == null
+                || experimentConfig.TemporalTrackingEnabled;
+            if (temporalTrackingEnabled)
+            {
+                UpdateLostStates();
+                SmoothActiveMoves();
+            }
+
             UpdateFallbackVisibility();
-            RemoveExpiredReplacements();
+            if (temporalTrackingEnabled)
+            {
+                RemoveExpiredReplacements();
+            }
         }
 
         public void ApplyDetections(IReadOnlyList<DetectionResult> detections)
         {
-            if (detections == null || prefabLibrary == null || positionSolver == null)
+            ApplyDetections(detections, default, null);
+        }
+
+        public void ApplyDetections(
+            IReadOnlyList<DetectionResult> detections,
+            DetectionCycleDiagnostics cycleDiagnostics,
+            List<ExperimentFrameRecord> outputRecords)
+        {
+            if (detections == null)
             {
                 return;
             }
 
+            bool temporalTrackingEnabled = experimentConfig == null
+                || experimentConfig.TemporalTrackingEnabled;
             float now = Time.time;
             for (int i = 0; i < detections.Count; i++)
             {
                 DetectionResult detection = detections[i];
+                long trackingStartTimestamp = 0;
+                ExperimentFrameRecord record = outputRecords != null
+                    ? CreateBaseRecord(detection, cycleDiagnostics)
+                    : null;
+
+                if (prefabLibrary == null || positionSolver == null)
+                {
+                    CompleteFailureRecord(
+                        record,
+                        trackingStartTimestamp,
+                        prefabLibrary == null
+                            ? "prefab_library_missing"
+                            : "position_solver_missing",
+                        outputRecords);
+                    continue;
+                }
+
                 if (!prefabLibrary.TryGetRule(detection.Label, out RetroReplacementRule rule))
                 {
+                    CompleteFailureRecord(
+                        record,
+                        trackingStartTimestamp,
+                        "replacement_rule_missing",
+                        outputRecords);
                     continue;
                 }
 
                 string key = rule.DetectionLabel.ToLowerInvariant();
                 if (!detection.IsValid(0f))
                 {
+                    CompleteFailureRecord(
+                        record,
+                        trackingStartTimestamp,
+                        "invalid_detection",
+                        outputRecords);
                     continue;
                 }
 
-                if (!positionSolver.TrySolvePose(detection, rule.RaycastAnchorInBoundingBox, out Pose pose))
+                bool poseSolved = positionSolver.TrySolvePose(
+                    detection,
+                    rule.RaycastAnchorInBoundingBox,
+                    out Pose pose,
+                    out PositionSolveDiagnostics solveDiagnostics);
+                ApplySolveDiagnostics(record, solveDiagnostics);
+                if (!poseSolved)
                 {
+                    CompleteFailureRecord(
+                        record,
+                        trackingStartTimestamp,
+                        string.IsNullOrEmpty(solveDiagnostics.FailureReason)
+                            ? "position_solve_failed"
+                            : solveDiagnostics.FailureReason,
+                        outputRecords);
                     continue;
                 }
 
                 pose.position += Vector3.up * rule.VerticalOffsetMeters;
                 pose.rotation *= rule.RotationOffset;
 
+                trackingStartTimestamp = ExperimentClock.Timestamp();
                 TrackedReplacement tracked = FindBestTrack(key, pose, Time.frameCount);
                 bool hasLockedInstance = tracked != null && tracked.Instance != null;
-                float requiredConfidence = hasLockedInstance
+                float requiredConfidence = temporalTrackingEnabled && hasLockedInstance
                     ? rule.TrackingMinConfidence
                     : rule.MinConfidence;
                 if (!detection.IsValid(requiredConfidence))
                 {
-                    if (hasLockedInstance)
+                    if (temporalTrackingEnabled && hasLockedInstance)
                     {
                         tracked.LastMatchedFrame = Time.frameCount;
                         tracked.LastObservationConfidence = detection.Confidence;
                         tracked.TrackingConfidenceThreshold = rule.TrackingMinConfidence;
                     }
 
+                    ApplyTrackDiagnostics(record, tracked, trackingStartTimestamp);
+                    CompleteFailureRecord(
+                        record,
+                        trackingStartTimestamp,
+                        hasLockedInstance
+                            ? "below_tracking_confidence"
+                            : "below_placement_confidence",
+                        outputRecords,
+                        false);
                     continue;
                 }
 
@@ -177,6 +265,7 @@ namespace AR80sRetro
                 {
                     tracked = new TrackedReplacement
                     {
+                        TrackId = nextTrackId++,
                         Label = key
                     };
                     trackedReplacements.Add(tracked);
@@ -185,11 +274,33 @@ namespace AR80sRetro
                 tracked.LastMatchedFrame = Time.frameCount;
                 tracked.LastObservationConfidence = detection.Confidence;
                 tracked.TrackingConfidenceThreshold = rule.TrackingMinConfidence;
-                UpdateReplacement(rule, detection, pose, now, tracked);
+                bool replacementReady = temporalTrackingEnabled
+                    ? UpdateReplacement(rule, detection, pose, now, tracked)
+                    : UpdateReplacementWithoutTemporal(rule, detection, pose, now, tracked);
+
+                ApplyTrackDiagnostics(record, tracked, trackingStartTimestamp);
+                if (record != null)
+                {
+                    record.Success = replacementReady;
+                    record.FailureReason = replacementReady ? string.Empty : "acquiring";
+                    outputRecords.Add(record);
+                }
+            }
+
+            if (!temporalTrackingEnabled)
+            {
+                RemoveUnmatchedDirectReplacements(Time.frameCount);
+            }
+            else if (outputRecords != null)
+            {
+                AppendUnmatchedTrackRecords(
+                    cycleDiagnostics,
+                    Time.frameCount,
+                    outputRecords);
             }
         }
 
-        private void UpdateReplacement(
+        private bool UpdateReplacement(
             RetroReplacementRule rule,
             DetectionResult detection,
             Pose pose,
@@ -200,7 +311,7 @@ namespace AR80sRetro
                 && tracked.State == ReplacementState.Lost
                 && !IsWithinReacquireRadius(tracked, pose))
             {
-                return;
+                return false;
             }
 
             tracked.LastSeenTime = now;
@@ -220,7 +331,7 @@ namespace AR80sRetro
 
                 if (tracked.ConfirmedFrames < rule.ConfirmationFrames)
                 {
-                    return;
+                    return false;
                 }
 
                 tracked.Instance = Instantiate(rule.Prefab, pose.position, pose.rotation, contentRoot);
@@ -231,12 +342,240 @@ namespace AR80sRetro
                 tracked.Instance.transform.rotation = tracked.LockedRotation;
                 AlignBottomToPlane(tracked.Instance, pose.position.y);
                 tracked.State = ReplacementState.Locked;
-                return;
+                return true;
             }
 
             tracked.Instance.transform.localScale = tracked.LockedScale;
             tracked.Instance.transform.rotation = tracked.LockedRotation;
             QueueMoveIfStable(tracked, pose);
+            return true;
+        }
+
+        private bool UpdateReplacementWithoutTemporal(
+            RetroReplacementRule rule,
+            DetectionResult detection,
+            Pose pose,
+            float now,
+            TrackedReplacement tracked)
+        {
+            tracked.LastSeenTime = now;
+            tracked.LastPose = pose;
+            tracked.ConfirmedFrames = 1;
+            tracked.PendingMoveFrames = 0;
+            tracked.HasMoveTarget = false;
+            tracked.MoveVelocity = Vector3.zero;
+
+            if (tracked.Instance == null)
+            {
+                tracked.Instance = Instantiate(rule.Prefab, pose.position, pose.rotation, contentRoot);
+            }
+
+            if (tracked.Instance == null)
+            {
+                tracked.State = ReplacementState.Searching;
+                return false;
+            }
+
+            tracked.Instance.transform.position = pose.position;
+            tracked.Instance.transform.rotation = pose.rotation;
+            tracked.Instance.transform.localScale = GetBaseScale(rule);
+            tracked.LockedScale = EstimateTargetScale(tracked.Instance, rule, detection, pose);
+            tracked.LockedRotation = pose.rotation;
+            tracked.Instance.transform.localScale = tracked.LockedScale;
+            tracked.Instance.transform.rotation = tracked.LockedRotation;
+            AlignBottomToPlane(tracked.Instance, pose.position.y);
+            tracked.State = ReplacementState.Locked;
+            return true;
+        }
+
+        private void RemoveUnmatchedDirectReplacements(int frame)
+        {
+            for (int i = trackedReplacements.Count - 1; i >= 0; i--)
+            {
+                TrackedReplacement tracked = trackedReplacements[i];
+                if (tracked.LastMatchedFrame == frame)
+                {
+                    continue;
+                }
+
+                ReleaseFadeMaterials(tracked);
+                if (tracked.Instance != null)
+                {
+                    Destroy(tracked.Instance);
+                }
+
+                trackedReplacements.RemoveAt(i);
+            }
+        }
+
+        private ExperimentFrameRecord CreateBaseRecord(
+            DetectionResult detection,
+            DetectionCycleDiagnostics cycleDiagnostics)
+        {
+            ExperimentFrameRecord record = new ExperimentFrameRecord
+            {
+                FrameId = cycleDiagnostics.FrameId,
+                TimestampMs = cycleDiagnostics.TimestampMs,
+                ClassLabel = detection.Label,
+                YoloConfidence = detection.Confidence,
+                BboxX = detection.NormalizedBox.x,
+                BboxY = detection.NormalizedBox.y,
+                BboxWidth = detection.NormalizedBox.width,
+                BboxHeight = detection.NormalizedBox.height,
+                CaptureLatencyMs = cycleDiagnostics.CaptureLatencyMs,
+                YoloLatencyMs = cycleDiagnostics.YoloLatencyMs,
+                OutputReadbackLatencyMs = cycleDiagnostics.OutputReadbackLatencyMs,
+                DepthOcclusionUsable = depthProvider != null
+                    && depthProvider.IsEnvironmentDepthUsable,
+                DepthSampleCapacity = depthProvider != null
+                    ? depthProvider.SampleGridSize * depthProvider.SampleGridSize
+                    : 0,
+                FadeFallbackActive = IsFadeFallbackActive()
+            };
+
+            if (experimentConfig != null)
+            {
+                experimentConfig.FillRecordContext(record);
+            }
+            else
+            {
+                record.AblationMode = "A3_BASELINE";
+                record.DepthFusionEnabled = true;
+                record.TemporalTrackingEnabled = true;
+                record.OcclusionFadeEnabled = fadeWhenDepthUnavailable;
+            }
+
+            return record;
+        }
+
+        private void AppendUnmatchedTrackRecords(
+            DetectionCycleDiagnostics cycleDiagnostics,
+            int unityFrame,
+            List<ExperimentFrameRecord> outputRecords)
+        {
+            for (int i = 0; i < trackedReplacements.Count; i++)
+            {
+                TrackedReplacement tracked = trackedReplacements[i];
+                if (tracked.LastMatchedFrame == unityFrame)
+                {
+                    continue;
+                }
+
+                ExperimentFrameRecord record = new ExperimentFrameRecord
+                {
+                    FrameId = cycleDiagnostics.FrameId,
+                    TimestampMs = cycleDiagnostics.TimestampMs,
+                    ClassLabel = tracked.Label,
+                    CaptureLatencyMs = cycleDiagnostics.CaptureLatencyMs,
+                    YoloLatencyMs = cycleDiagnostics.YoloLatencyMs,
+                    OutputReadbackLatencyMs = cycleDiagnostics.OutputReadbackLatencyMs,
+                    DepthOcclusionUsable = depthProvider != null
+                        && depthProvider.IsEnvironmentDepthUsable,
+                    DepthSampleCapacity = depthProvider != null
+                        ? depthProvider.SampleGridSize * depthProvider.SampleGridSize
+                        : 0,
+                    FadeFallbackActive = IsFadeFallbackActive(),
+                    Success = false,
+                    FailureReason = "track_unmatched_this_cycle",
+                    ResultSource = "Derived"
+                };
+                if (experimentConfig != null)
+                {
+                    experimentConfig.FillRecordContext(record);
+                }
+
+                ApplyTrackDiagnostics(record, tracked, 0);
+                outputRecords.Add(record);
+            }
+        }
+
+        private static void ApplySolveDiagnostics(
+            ExperimentFrameRecord record,
+            PositionSolveDiagnostics diagnostics)
+        {
+            if (record == null)
+            {
+                return;
+            }
+
+            record.PlaneRaycastSuccess = diagnostics.PlaneRaycastSuccess;
+            record.DepthSamplingAttempted = diagnostics.Depth.Attempted;
+            record.DepthAvailable = diagnostics.Depth.Available;
+            record.DepthValidSampleCount = diagnostics.Depth.ValidSampleCount;
+            record.DepthConfidenceAvailable = diagnostics.Depth.ConfidenceAvailable;
+            record.DepthLatencyMs = diagnostics.Depth.LatencyMs;
+            record.RaycastFusionLatencyMs = diagnostics.RaycastFusionLatencyMs;
+            if (diagnostics.PlaneRaycastSuccess)
+            {
+                record.PlanePosition = diagnostics.PlanePosition;
+                record.FusedPosition = diagnostics.FusedPosition;
+            }
+
+            if (diagnostics.Depth.Available)
+            {
+                record.DepthMedianMeters = diagnostics.Depth.MedianDepthMeters;
+                if (diagnostics.Depth.ConfidenceAvailable)
+                {
+                    record.DepthConfidence = diagnostics.Depth.MedianConfidence;
+                }
+                record.DepthWorldPosition = diagnostics.DepthWorldPosition;
+            }
+        }
+
+        private void ApplyTrackDiagnostics(
+            ExperimentFrameRecord record,
+            TrackedReplacement tracked,
+            long trackingStartTimestamp)
+        {
+            if (record == null)
+            {
+                return;
+            }
+
+            record.TrackingLatencyMs = trackingStartTimestamp > 0
+                ? ExperimentClock.ElapsedMilliseconds(trackingStartTimestamp)
+                : 0f;
+            record.DepthOcclusionUsable = depthProvider != null
+                && depthProvider.IsEnvironmentDepthUsable;
+            record.FadeFallbackActive = IsFadeFallbackActive();
+            if (tracked == null)
+            {
+                return;
+            }
+
+            record.TrackId = tracked.TrackId;
+            record.TrackState = tracked.State.ToString();
+            record.OutputOpacity = tracked.CurrentOpacity;
+            if (tracked.Instance == null)
+            {
+                return;
+            }
+
+            Transform instanceTransform = tracked.Instance.transform;
+            record.OutputYawDegrees = instanceTransform.eulerAngles.y;
+            record.OutputScale = instanceTransform.localScale;
+        }
+
+        private static void CompleteFailureRecord(
+            ExperimentFrameRecord record,
+            long trackingStartTimestamp,
+            string failureReason,
+            List<ExperimentFrameRecord> outputRecords,
+            bool updateTrackingLatency = true)
+        {
+            if (record == null || outputRecords == null)
+            {
+                return;
+            }
+
+            if (updateTrackingLatency && trackingStartTimestamp > 0)
+            {
+                record.TrackingLatencyMs = ExperimentClock.ElapsedMilliseconds(trackingStartTimestamp);
+            }
+
+            record.Success = false;
+            record.FailureReason = failureReason;
+            outputRecords.Add(record);
         }
 
         private void QueueMoveIfStable(TrackedReplacement tracked, Pose pose)
@@ -306,11 +645,7 @@ namespace AR80sRetro
 
         private void UpdateFallbackVisibility()
         {
-            bool depthCanRenderOcclusion = depthProvider != null
-                && depthProvider.IsEnvironmentDepthUsable;
-            bool useFallback = fadeWhenDepthUnavailable
-                && !depthCanRenderOcclusion
-                && Time.timeSinceLevelLoad >= depthStartupGraceSeconds;
+            bool useFallback = IsFadeFallbackActive();
             float minimumOpacity = Mathf.Clamp01(fallbackMinimumOpacity);
             float fadeSpeed = Mathf.Max(
                 0.01f,
@@ -354,6 +689,18 @@ namespace AR80sRetro
                     fadeSpeed * Time.deltaTime);
                 ApplyOpacity(tracked, nextOpacity);
             }
+        }
+
+        private bool IsFadeFallbackActive()
+        {
+            bool featureEnabled = experimentConfig == null
+                || experimentConfig.OcclusionFadeFallbackEnabled;
+            bool depthCanRenderOcclusion = depthProvider != null
+                && depthProvider.IsEnvironmentDepthUsable;
+            return featureEnabled
+                && fadeWhenDepthUnavailable
+                && !depthCanRenderOcclusion
+                && Time.timeSinceLevelLoad >= depthStartupGraceSeconds;
         }
 
         private static void ApplyOpacity(TrackedReplacement tracked, float opacity)
