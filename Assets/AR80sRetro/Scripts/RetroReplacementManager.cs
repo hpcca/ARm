@@ -253,7 +253,7 @@ namespace AR80sRetro
                     CompleteFailureRecord(
                         record,
                         trackingStartTimestamp,
-                        hasLockedInstance
+                        temporalTrackingEnabled && hasLockedInstance
                             ? "below_tracking_confidence"
                             : "below_placement_confidence",
                         outputRecords,

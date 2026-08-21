@@ -41,6 +41,11 @@ An empty numeric field means the value was not observed for that row; zero is no
 used as a substitute for missing data. When ARCore supplies no confidence image,
 `depth_confidence_available=false` and `depth_confidence` is empty.
 
+Failure reasons must also agree with the enabled ablation features. In particular,
+`below_tracking_confidence` is valid only when temporal tracking is enabled; A0/A1
+must report the placement-threshold reason instead. The validator rejects this
+tracking-only label when `temporal_tracking_enabled=false`.
+
 ## Timing boundaries
 
 - `capture_latency_ms`: acquire CPU image, convert, rotate and upload the inference texture.

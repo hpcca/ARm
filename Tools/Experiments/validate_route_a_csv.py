@@ -235,6 +235,13 @@ def validate(csv_path: Path, session_path: Path | None) -> tuple[list[str], dict
                 and row.get("fade_fallback_active", "").lower() == "true"
             ):
                 errors.append(f"{prefix}: fade fallback activated while the feature was disabled")
+            if (
+                row.get("temporal_tracking_enabled", "").lower() == "false"
+                and row.get("failure_reason", "").strip() == "below_tracking_confidence"
+            ):
+                errors.append(
+                    f"{prefix}: below_tracking_confidence is invalid when temporal tracking is disabled"
+                )
 
             success = row.get("success", "").lower() == "true"
             if success:
@@ -343,11 +350,30 @@ def run_self_test() -> int:
             writer = csv.DictWriter(handle, fieldnames=REQUIRED_COLUMNS)
             writer.writeheader()
             writer.writerow(row)
-        errors, counts = validate(csv_path, None)
-    if errors or counts.get("rows") != 1:
+        valid_errors, counts = validate(csv_path, None)
+        row.update({
+            "ablation_mode": "A1",
+            "temporal_tracking_enabled": "false",
+            "occlusion_fade_enabled": "false",
+            "success": "false",
+            "failure_reason": "below_tracking_confidence",
+        })
+        with csv_path.open("w", encoding="utf-8", newline="") as handle:
+            writer = csv.DictWriter(handle, fieldnames=REQUIRED_COLUMNS)
+            writer.writeheader()
+            writer.writerow(row)
+        invalid_errors, _ = validate(csv_path, None)
+    if valid_errors or counts.get("rows") != 1:
         print("SELF-TEST FAILED")
-        for error in errors:
+        for error in valid_errors:
             print(f"- {error}")
+        return 1
+    if not any(
+        "below_tracking_confidence is invalid when temporal tracking is disabled" in error
+        for error in invalid_errors
+    ):
+        print("SELF-TEST FAILED")
+        print("- validator accepted a tracking-only failure reason for A1")
         return 1
     print("SELF-TEST PASSED")
     return 0
