@@ -19,7 +19,7 @@ namespace AR80sRetro
         [SerializeField] private float verticalOffsetMeters;
         [SerializeField] private Vector2 raycastAnchorInBoundingBox = new Vector2(0.5f, 0.9f);
         [SerializeField] private Vector3 rotationOffsetEuler;
-        [SerializeField, Min(0.01f)] private float scaleCalibrationMultiplier = 1f;
+        [SerializeField, Min(0.01f)] private float scaleCalibrationMultiplier =1f;
         [SerializeField] private float minConfidence = 0.6f;
         [SerializeField] private float trackingMinConfidence = 0.35f;
         [SerializeField] private int confirmationFrames = 2;
@@ -28,7 +28,7 @@ namespace AR80sRetro
         [SerializeField] private ScaleBoundingBoxAxis scaleBoundingBoxAxis = ScaleBoundingBoxAxis.Height;
         [SerializeField, Min(0.1f)] private float estimatedHeightMultiplier = 0.9f;
         [SerializeField, Min(0.1f)] private float estimatedWidthMultiplier = 0.9f;
-        [SerializeField] private Vector2 scaleMultiplierRange = new Vector2(0.25f, 4f);
+        [SerializeField] private Vector2 scaleMultiplierRange = new Vector2(0.25f,4f);
 
         public string DetectionLabel => detectionLabel;
         public GameObject Prefab => prefab;

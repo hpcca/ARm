@@ -8,6 +8,7 @@ namespace AR80sRetro
 {
     public sealed class YoloObjectDetector : MonoBehaviour
     {
+
         private readonly struct TargetClass
         {
             public TargetClass(int index, string label)
@@ -149,6 +150,7 @@ namespace AR80sRetro
                 worker = new Worker(runtimeModel, selectedBackend);
                 inputTensor = new Tensor<float>(new TensorShape(1, 3, InputSize, InputSize));
                 Debug.Log($"YOLO initialized with {selectedBackend} backend.", this);
+
                 return true;
             }
             catch (Exception exception)
@@ -191,6 +193,7 @@ namespace AR80sRetro
 
                 inferenceCount++;
                 DetectionsReady?.Invoke(detectionResults);
+
             }
             catch (Exception exception)
             {

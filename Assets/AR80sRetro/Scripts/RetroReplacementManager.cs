@@ -5,6 +5,19 @@ namespace AR80sRetro
 {
     public sealed class RetroReplacementManager : MonoBehaviour
     {
+        private YoloObjectDetector detector;
+        private void OnEnable()
+        {
+        detector = FindObjectOfType<YoloObjectDetector>();
+        if(detector != null)
+            detector.DetectionsReady += ApplyDetections;
+        }
+        private void OnDisable()
+    {
+    if(detector != null)
+        detector.DetectionsReady -= ApplyDetections;
+    }
+
         private enum ReplacementState
         {
             Searching,
@@ -45,6 +58,53 @@ namespace AR80sRetro
         [SerializeField, Min(0.01f)] private float movementSmoothTime = 0.25f;
 
         private readonly List<TrackedReplacement> trackedReplacements = new List<TrackedReplacement>();
+        
+       private Quaternion CalculatePCAOrientation(string label, Rect normalizedBox, Camera cam)
+{
+    float w = normalizedBox.width;
+    float h = normalizedBox.height;
+    float cx = normalizedBox.center.x;
+    float cy = normalizedBox.center.y;
+
+    float a = w * w;
+    float b = w * h;
+    float c = h * h;
+    float trace = a + c;
+    float det = a * c - b * b;
+    float sqrtDelta = Mathf.Sqrt(trace * trace - 4 * det);
+    float lambda1 = (trace + sqrtDelta) / 2f;
+    float lambda2 = (trace - sqrtDelta) / 2f;
+    // =================================================================
+
+    Vector2 eigenVec;
+    if (Mathf.Abs(b) < 0.0001f)
+        eigenVec = a > c ? new Vector2(1, 0) : new Vector2(0, 1);
+    else
+        eigenVec = lambda1 > lambda2 ? new Vector2(b, lambda1 - a) : new Vector2(-b, lambda2 - a);
+    eigenVec.Normalize();
+
+    float baseYaw = Mathf.Atan2(eigenVec.y, eigenVec.x) * Mathf.Rad2Deg;
+
+    if (label == "chair")
+    {
+        float screenX = normalizedBox.center.x;
+        float targetYaw = cam.transform.eulerAngles.y;
+        float boxAspect = normalizedBox.height / normalizedBox.width;
+
+        if (boxAspect > 1.1f)
+            targetYaw += 180f;
+        if (screenX < 0.3f)
+            targetYaw += 90f;
+        else if (screenX > 0.7f)
+            targetYaw -= 90f;
+
+        return Quaternion.Euler(0, targetYaw, 0);
+    }
+    float finalYaw = cam.transform.eulerAngles.y + baseYaw;
+    return Quaternion.Euler(0, finalYaw, 0);
+}
+
+
 
         private void Awake()
         {
@@ -96,7 +156,9 @@ namespace AR80sRetro
                 }
 
                 pose.position += Vector3.up * rule.VerticalOffsetMeters;
-                pose.rotation *= rule.RotationOffset;
+                //pose.rotation *= rule.RotationOffset;
+                Quaternion pcaRot = CalculatePCAOrientation(detection.Label.ToLowerInvariant(), detection.NormalizedBox, arCamera);
+                pose.rotation = pcaRot * rule.RotationOffset;
 
                 TrackedReplacement tracked = FindBestTrack(key, pose, Time.frameCount);
                 bool hasLockedInstance = tracked != null && tracked.Instance != null;
@@ -159,7 +221,7 @@ namespace AR80sRetro
                 tracked.Instance = Instantiate(rule.Prefab, pose.position, pose.rotation, contentRoot);
                 tracked.Instance.transform.localScale = GetBaseScale(rule);
                 tracked.LockedScale = EstimateTargetScale(tracked.Instance, rule, detection, pose);
-                tracked.LockedRotation = pose.rotation;
+                //tracked.LockedRotation = pose.rotation;
                 tracked.Instance.transform.localScale = tracked.LockedScale;
                 tracked.Instance.transform.rotation = tracked.LockedRotation;
                 AlignBottomToPlane(tracked.Instance, pose.position.y);
@@ -168,8 +230,10 @@ namespace AR80sRetro
             }
 
             tracked.Instance.transform.localScale = tracked.LockedScale;
-            tracked.Instance.transform.rotation = tracked.LockedRotation;
+            Quaternion realtimeRot = CalculatePCAOrientation(detection.Label.ToLowerInvariant(), detection.NormalizedBox, arCamera);
+            tracked.Instance.transform.rotation = realtimeRot * rule.RotationOffset;
             QueueMoveIfStable(tracked, pose);
+
         }
 
         private void QueueMoveIfStable(TrackedReplacement tracked, Pose pose)
@@ -223,7 +287,6 @@ namespace AR80sRetro
                     ref tracked.MoveVelocity,
                     movementSmoothTime);
                 instanceTransform.localScale = tracked.LockedScale;
-                instanceTransform.rotation = tracked.LockedRotation;
                 AlignBottomToPlane(tracked.Instance, tracked.LastPose.position.y);
 
                 Vector2 currentHorizontal = new Vector2(instanceTransform.position.x, instanceTransform.position.z);
@@ -361,6 +424,10 @@ namespace AR80sRetro
                 scaleMultiplier,
                 Mathf.Min(range.x, range.y),
                 Mathf.Max(range.x, range.y));
+            if (rule.DetectionLabel.ToLowerInvariant() == "chair")
+            {
+                scaleMultiplier *= 0.4f;
+            }
             return Vector3.Scale(instance.transform.localScale, Vector3.one * scaleMultiplier);
         }
 
