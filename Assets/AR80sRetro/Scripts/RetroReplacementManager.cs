@@ -80,10 +80,10 @@ namespace AR80sRetro
         [SerializeField] private ARRaycastPositionSolver positionSolver;
         [SerializeField] private Transform contentRoot;
         [SerializeField] private Camera arCamera;
-        [SerializeField] private bool destroyWhenLost;
+        [SerializeField] private bool destroyWhenLost = true;
         [SerializeField] private float lostGraceSeconds = 1f;
         [SerializeField, Min(0f)] private float lostStateDelaySeconds = 1f;
-        [SerializeField, Min(0.05f)] private float reacquireMatchRadiusMeters = 0.4f;
+        [SerializeField, Min(0.05f)] private float reacquireMatchRadiusMeters = 0.6f;
         [SerializeField] private float duplicateRadiusMeters = 0.25f;
         [SerializeField, Min(0.005f)] private float movementDeadZoneMeters = 0.05f;
         [SerializeField, Min(1)] private int movementConfirmationFrames = 3;
@@ -242,7 +242,7 @@ namespace AR80sRetro
                     : rule.MinConfidence;
                 if (!detection.IsValid(requiredConfidence))
                 {
-                    if (temporalTrackingEnabled && hasLockedInstance)
+                    if (temporalTrackingEnabled && tracked != null)
                     {
                         tracked.LastMatchedFrame = Time.frameCount;
                         tracked.LastObservationConfidence = detection.Confidence;
