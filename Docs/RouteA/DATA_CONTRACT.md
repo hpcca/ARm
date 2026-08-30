@@ -11,6 +11,11 @@ overwritten; a `_run_<UTC timestamp>` suffix is added on collision.
 
 - `frames.csv`: buffered per-inference/per-track observations
 - `session.json`: immutable configuration and device metadata for the run
+- `reference_poses.csv`: optional asynchronous evaluation-only AprilTag reference
+  samples; it is never read by Route A
+- `reference_config.json`: optional immutable AprilTag/calibration provenance and
+  reference-validity gates, including fixed tag-to-object and recorded
+  model-to-object transforms
 
 CSV serialization uses UTF-8 without BOM, `InvariantCulture`, newline-safe quoting
 and doubled embedded quotes. Disk appends run on a background task and start only
@@ -32,7 +37,9 @@ Core groups:
 - Depth: whether sampling was attempted, availability, valid count, capacity,
   median metres, confidence-image availability and confidence.
 - Geometry: plane success/position, depth world point and fused position.
-- Output: category placement yaw, scale, track ID/state and renderer opacity.
+- Synchronization: a monotonic cycle timestamp and the AR Camera world pose.
+- Output: rendered model position/quaternion, category placement yaw, scale,
+  track ID/state and renderer opacity.
 - Timing: capture, full YOLO, output readback, depth, raycast/fusion, tracking and total.
 - Fallback: render-depth usability and fade activation.
 - Outcome: technical per-row success and a machine-readable failure reason.
@@ -75,3 +82,14 @@ all per-category placement/scale rules, effective A0–A3 flags and scene notes.
 
 `build_commit_sha=UNSET` is invalid for formal collection. The validator deliberately
 rejects it.
+
+## Evaluation-only reference stream
+
+`reference_poses.csv` contains its own monotonic/UTC/CPU-image timestamps, image
+dimensions, full camera intrinsics, explicit validity-gate result, AR Camera pose,
+tag pose, and the calibrated object reference pose in camera and world coordinates.
+It is joined to `frames.csv` offline; it is not duplicated into every track row.
+
+The reference stream can use `result_source=Invalid` when the upstream FOV-only
+pose model's intrinsics assumptions fail. A detected tag is not automatically valid
+ground truth. See `APRILTAG_GT_PROTOCOL.md`.

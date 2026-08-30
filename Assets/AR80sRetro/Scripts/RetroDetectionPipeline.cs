@@ -115,6 +115,8 @@ namespace AR80sRetro
             {
                 FrameId = cycleDiagnostics.FrameId,
                 TimestampMs = cycleDiagnostics.TimestampMs,
+                CycleMonotonicMs = ExperimentClock.TimestampMilliseconds(
+                    cycleDiagnostics.CycleStartTimestamp),
                 CaptureLatencyMs = cycleDiagnostics.CaptureLatencyMs,
                 YoloLatencyMs = cycleDiagnostics.YoloLatencyMs,
                 OutputReadbackLatencyMs = cycleDiagnostics.OutputReadbackLatencyMs,

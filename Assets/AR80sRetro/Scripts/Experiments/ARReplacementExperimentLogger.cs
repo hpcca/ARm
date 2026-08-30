@@ -41,7 +41,12 @@ namespace AR80sRetro.Experiments
             public float iou_threshold;
             public int max_detections;
             public float inference_interval_seconds;
+            public string screen_orientation;
+            public string camera_frame_rotation;
             public string depth_mode;
+            public string depth_uv_transform_id;
+            public bool depth_flip_x;
+            public bool depth_flip_y;
             public bool depth_temporal_smoothing;
             public int depth_sample_grid_size;
             public float depth_sample_radius_normalized;
@@ -278,9 +283,18 @@ namespace AR80sRetro.Experiments
                 iou_threshold = detector != null ? detector.IouThreshold : 0f,
                 max_detections = detector != null ? detector.MaxDetections : 0,
                 inference_interval_seconds = detector != null ? detector.InferenceIntervalSeconds : 0f,
+                screen_orientation = Screen.orientation.ToString(),
+                camera_frame_rotation = depthProvider != null
+                    ? depthProvider.CameraFrameRotationId
+                    : "Not configured",
                 depth_mode = depthProvider != null
                     ? depthProvider.ConfiguredDepthMode.ToString()
                     : "Not configured",
+                depth_uv_transform_id = depthProvider != null
+                    ? depthProvider.DepthUvTransformId
+                    : "Not configured",
+                depth_flip_x = depthProvider != null && depthProvider.FlipDepthX,
+                depth_flip_y = depthProvider != null && depthProvider.FlipDepthY,
                 depth_temporal_smoothing = depthProvider != null
                     && depthProvider.TemporalSmoothingRequested,
                 depth_sample_grid_size = depthProvider != null ? depthProvider.SampleGridSize : 0,

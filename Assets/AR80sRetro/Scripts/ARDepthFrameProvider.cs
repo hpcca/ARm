@@ -12,6 +12,7 @@ namespace AR80sRetro
     {
         [SerializeField] private AROcclusionManager occlusionManager;
         [SerializeField] private Camera arCamera;
+        [SerializeField] private ARCameraFrameProvider frameProvider;
         [SerializeField] private EnvironmentDepthMode requestedDepthMode = EnvironmentDepthMode.Fastest;
         [SerializeField] private bool requestTemporalSmoothing = true;
         [SerializeField, Range(0f, 0.2f)] private float sampleRadiusNormalized = 0.025f;
@@ -45,6 +46,14 @@ namespace AR80sRetro
         public float MaximumDepthMeters => maxDepthMeters;
         public int MinimumConfidence => minConfidence;
         public float DepthAvailabilityGraceSeconds => depthAvailabilityGraceSeconds;
+        public string CameraFrameRotationId => frameProvider != null
+            ? frameProvider.ConfiguredFrameRotation.ToString()
+            : "Not configured";
+        public string DepthUvTransformId => frameProvider != null
+            ? frameProvider.DepthUvTransformId
+            : "Not configured";
+        public bool FlipDepthX => flipDepthX;
+        public bool FlipDepthY => flipDepthY;
 
         private void Awake()
         {
@@ -56,6 +65,11 @@ namespace AR80sRetro
             if (occlusionManager == null && arCamera != null)
             {
                 occlusionManager = arCamera.GetComponent<AROcclusionManager>();
+            }
+
+            if (frameProvider == null)
+            {
+                frameProvider = FindObjectOfType<ARCameraFrameProvider>();
             }
 
             if (occlusionManager != null
@@ -74,6 +88,7 @@ namespace AR80sRetro
             occlusionManager = arCamera != null
                 ? arCamera.GetComponent<AROcclusionManager>()
                 : FindObjectOfType<AROcclusionManager>();
+            frameProvider = FindObjectOfType<ARCameraFrameProvider>();
         }
 
         private void OnEnable()
@@ -259,8 +274,16 @@ namespace AR80sRetro
                         normalizedPoint.x = Mathf.Clamp01(normalizedPoint.x);
                         normalizedPoint.y = Mathf.Clamp01(normalizedPoint.y);
 
-                        int depthX = NormalizedToImageX(normalizedPoint.x, depthImage.width);
-                        int depthY = NormalizedToImageY(normalizedPoint.y, depthImage.height);
+                        if (frameProvider == null
+                            || !frameProvider.TryScreenPointToCpuImageNormalized(
+                                normalizedPoint,
+                                out Vector2 cpuImagePoint))
+                        {
+                            continue;
+                        }
+
+                        int depthX = NormalizedToImageX(cpuImagePoint.x, depthImage.width);
+                        int depthY = NormalizedToImageY(cpuImagePoint.y, depthImage.height);
                         if (!TryReadDepth(depthImage, depthX, depthY, out float depth)
                             || depth < minDepthMeters
                             || depth > maxDepthMeters)
@@ -271,8 +294,12 @@ namespace AR80sRetro
                         float confidenceValue = 255f;
                         if (hasConfidenceImage)
                         {
-                            int confidenceX = NormalizedToImageX(normalizedPoint.x, confidenceImage.width);
-                            int confidenceY = NormalizedToImageY(normalizedPoint.y, confidenceImage.height);
+                            int confidenceX = NormalizedToImageX(
+                                cpuImagePoint.x,
+                                confidenceImage.width);
+                            int confidenceY = NormalizedToImageY(
+                                cpuImagePoint.y,
+                                confidenceImage.height);
                             if (!TryReadConfidence(confidenceImage, confidenceX, confidenceY, out confidenceValue)
                                 || confidenceValue < minConfidence)
                             {

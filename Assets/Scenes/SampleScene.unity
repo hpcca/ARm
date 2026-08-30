@@ -6202,6 +6202,7 @@ GameObject:
   - component: {fileID: 1702211334}
   - component: {fileID: 1702211336}
   - component: {fileID: 1702211335}
+  - component: {fileID: 1702211337}
   m_Layer: 0
   m_Name: AR80sRetro System
   m_TagString: Untagged
@@ -6413,6 +6414,7 @@ MonoBehaviour:
   m_EditorClassIdentifier:
   occlusionManager: {fileID: 1702211333}
   arCamera: {fileID: 331264287}
+  frameProvider: {fileID: 1702211329}
   requestedDepthMode: 1
   requestTemporalSmoothing: 1
   sampleRadiusNormalized: 0.025
@@ -6454,28 +6456,65 @@ MonoBehaviour:
   m_Enabled: 1
   m_EditorHideFlags: 0
   m_Script: {fileID: 11500000, guid: faf08b13621a4b348a9e6396b97de166, type: 3}
-  m_Name:
-  m_EditorClassIdentifier:
+  m_Name: 
+  m_EditorClassIdentifier: 
   session:
-    sessionId:
-    trialId: trial_001
-    objectId: object_001
+    sessionId: pilot_gt_cup01_axis_check_20260826
+    trialId: axis_check_000
+    objectId: cup01
     expectedObjectCount: 1
-    sceneId: scene_001
-    conditionId: baseline
+    sceneId: fixture_board_01
+    conditionId: gt_axis_sanity_yaw000
     distanceCondition: 1.0m
     viewCondition: frontal
     occlusionPercent: 0
-    lightingCondition: normal
-    buildCommitSha:
+    lightingCondition: normal_diffuse
+    buildCommitSha: 9167c72d02a40be9924c054f56a4a2df63f7c71f
     yoloModelIdentifier: yolov8n-coco-640
-    sceneDescription:
+    sceneDescription: Fixed Tag 0/cup fixture; full 9x9 pattern 144 mm; detection
+      edge 80 mm; Tag centre (112,148.5) mm; cup-bottom centre (320,148.5) mm; handle
+      toward Tag +X; AprilTag is evaluation-only and never feeds Route A.
   ablationMode: 3
   customDepthPositionFusion: 1
   customTemporalTracking: 1
   customOcclusionFadeFallback: 1
   debugOverlayEnabled: 1
-  loggingEnabled: 0
+  loggingEnabled: 1
+--- !u!114 &1702211337
+MonoBehaviour:
+  m_ObjectHideFlags: 0
+  m_CorrespondingSourceObject: {fileID: 0}
+  m_PrefabInstance: {fileID: 0}
+  m_PrefabAsset: {fileID: 0}
+  m_GameObject: {fileID: 1702211323}
+  m_Enabled: 1
+  m_EditorHideFlags: 0
+  m_Script: {fileID: 11500000, guid: 7a17c6d2d3a14f65ad10a03bf105725b, type: 3}
+  m_Name: 
+  m_EditorClassIdentifier: 
+  experimentConfig: {fileID: 1702211336}
+  experimentLogger: {fileID: 1702211335}
+  cameraManager: {fileID: 608830360}
+  arCamera: {fileID: 331264287}
+  frameProvider: {fileID: 1702211329}
+  targetTagId: 0
+  tagSizeMeters: 0.08
+  decimation: 2
+  sampleIntervalSeconds: 0.25
+  maximumImageWidth: 960
+  tagFromObjectPositionMeters: {x: 0.208, y: 0, z: 0}
+  tagFromObjectEulerDegrees: {x: 0, y: 90, z: -90}
+  modelFromObjectPositionLocalUnits: {x: -0.0007280349, y: -0.0000000121071935, z: -0.000034180004}
+  modelFromObjectEulerDegrees: {x: 0, y: 0, z: 0}
+  modelAlignmentId: cup_prefab_422aab88_bounds_bottom_plusz_20260826_v1
+  calibrationId: fixture_cup01_tag0_20260826_v1
+  tagSizeMeasurementUncertaintyMeters: 0.0005
+  tagToObjectTranslationUncertaintyMeters: 0.002
+  tagToObjectYawUncertaintyDegrees: 1
+  maxFxFyRelativeDelta: 0.01
+  maxPrincipalOffsetFraction: 0.01
+  recordsPerBatch: 16
+  flushIntervalSeconds: 2
 --- !u!1 &1756045394
 GameObject:
   m_ObjectHideFlags: 0

@@ -94,5 +94,10 @@ A1/A2 keep Environment Depth available for position fusion.
 - A0–A3 feature mappings are checked in the Editor validator.
 - Python CSV validator self-test passes.
 
-Android ARCore behavior, device-specific depth support and measured performance are
-not yet validated; those require the physical-device pilot.
+Physical-device collection has now been exercised on a Xiaomi 23127PN0CC. The latest
+independently selected A3 session passes the strengthened CSV contract and provides
+measurable latency, effective-cycle frequency, depth availability, duplicate-track
+and position-stability evidence. It is not a successful formal trial: duplicate
+active tracks exceeded the single expected object, plane-raycast failures were
+observed, and the fade fallback did not activate. These are evaluation outcomes, not
+reasons to alter the audited Route A architecture after freezing it for comparison.

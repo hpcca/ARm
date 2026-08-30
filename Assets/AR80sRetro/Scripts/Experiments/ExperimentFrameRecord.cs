@@ -83,7 +83,8 @@ namespace AR80sRetro.Experiments
         private static readonly char[] CsvQuoteCharacters = { ',', '"', '\r', '\n' };
 
         public const string CsvHeader =
-            "session_id,trial_id,frame_id,timestamp_ms,object_id,expected_object_count," +
+            "session_id,trial_id,frame_id,timestamp_ms,cycle_monotonic_ms," +
+            "object_id,expected_object_count," +
             "class_label,scene_id," +
             "condition_id,distance_condition,view_condition,occlusion_percent,lighting_condition," +
             "ablation_mode,yolo_confidence,bbox_x,bbox_y,bbox_width,bbox_height," +
@@ -93,7 +94,12 @@ namespace AR80sRetro.Experiments
             "depth_confidence_available,depth_confidence," +
             "plane_raycast_success,plane_position_x,plane_position_y,plane_position_z," +
             "depth_world_x,depth_world_y,depth_world_z,fused_position_x,fused_position_y," +
-            "fused_position_z,output_yaw_deg,output_scale_x,output_scale_y,output_scale_z," +
+            "fused_position_z,camera_world_position_x,camera_world_position_y," +
+            "camera_world_position_z,camera_world_rotation_x,camera_world_rotation_y," +
+            "camera_world_rotation_z,camera_world_rotation_w,output_position_x," +
+            "output_position_y,output_position_z,output_rotation_x,output_rotation_y," +
+            "output_rotation_z,output_rotation_w,output_yaw_deg,output_scale_x," +
+            "output_scale_y,output_scale_z," +
             "track_id,track_state,capture_latency_ms,yolo_latency_ms,output_readback_latency_ms," +
             "depth_latency_ms,raycast_fusion_latency_ms,tracking_latency_ms,total_latency_ms," +
             "depth_occlusion_usable,fade_fallback_active,output_opacity,success,failure_reason," +
@@ -103,6 +109,7 @@ namespace AR80sRetro.Experiments
         public string TrialId;
         public long FrameId;
         public long TimestampMs;
+        public double CycleMonotonicMs = double.NaN;
         public string ObjectId;
         public int ExpectedObjectCount = 1;
         public string ClassLabel;
@@ -132,6 +139,10 @@ namespace AR80sRetro.Experiments
         public Vector3 PlanePosition = NaNVector();
         public Vector3 DepthWorldPosition = NaNVector();
         public Vector3 FusedPosition = NaNVector();
+        public Vector3 CameraWorldPosition = NaNVector();
+        public Quaternion CameraWorldRotation = NaNQuaternion();
+        public Vector3 OutputPosition = NaNVector();
+        public Quaternion OutputRotation = NaNQuaternion();
         public float OutputYawDegrees = float.NaN;
         public Vector3 OutputScale = NaNVector();
         public int TrackId = -1;
@@ -157,6 +168,7 @@ namespace AR80sRetro.Experiments
             Append(builder, TrialId);
             Append(builder, FrameId);
             Append(builder, TimestampMs);
+            Append(builder, CycleMonotonicMs);
             Append(builder, ObjectId);
             Append(builder, ExpectedObjectCount);
             Append(builder, ClassLabel);
@@ -192,6 +204,20 @@ namespace AR80sRetro.Experiments
             Append(builder, FusedPosition.x);
             Append(builder, FusedPosition.y);
             Append(builder, FusedPosition.z);
+            Append(builder, CameraWorldPosition.x);
+            Append(builder, CameraWorldPosition.y);
+            Append(builder, CameraWorldPosition.z);
+            Append(builder, CameraWorldRotation.x);
+            Append(builder, CameraWorldRotation.y);
+            Append(builder, CameraWorldRotation.z);
+            Append(builder, CameraWorldRotation.w);
+            Append(builder, OutputPosition.x);
+            Append(builder, OutputPosition.y);
+            Append(builder, OutputPosition.z);
+            Append(builder, OutputRotation.x);
+            Append(builder, OutputRotation.y);
+            Append(builder, OutputRotation.z);
+            Append(builder, OutputRotation.w);
             Append(builder, OutputYawDegrees);
             Append(builder, OutputScale.x);
             Append(builder, OutputScale.y);
@@ -219,6 +245,11 @@ namespace AR80sRetro.Experiments
             return new Vector3(float.NaN, float.NaN, float.NaN);
         }
 
+        private static Quaternion NaNQuaternion()
+        {
+            return new Quaternion(float.NaN, float.NaN, float.NaN, float.NaN);
+        }
+
         private static void Append(StringBuilder builder, string value)
         {
             AppendLast(builder, value);
@@ -238,6 +269,13 @@ namespace AR80sRetro.Experiments
         private static void Append(StringBuilder builder, float value)
         {
             Append(builder, float.IsNaN(value)
+                ? string.Empty
+                : value.ToString("R", CultureInfo.InvariantCulture));
+        }
+
+        private static void Append(StringBuilder builder, double value)
+        {
+            Append(builder, double.IsNaN(value)
                 ? string.Empty
                 : value.ToString("R", CultureInfo.InvariantCulture));
         }
@@ -275,6 +313,11 @@ namespace AR80sRetro.Experiments
         public static float ElapsedMilliseconds(long startTimestamp)
         {
             return (float)((Stopwatch.GetTimestamp() - startTimestamp) * MillisecondsPerTick);
+        }
+
+        public static double TimestampMilliseconds(long timestamp)
+        {
+            return timestamp * MillisecondsPerTick;
         }
     }
 }

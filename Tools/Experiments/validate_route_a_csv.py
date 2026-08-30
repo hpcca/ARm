@@ -14,7 +14,7 @@ from pathlib import Path
 
 
 REQUIRED_COLUMNS = [
-    "session_id", "trial_id", "frame_id", "timestamp_ms", "object_id",
+    "session_id", "trial_id", "frame_id", "timestamp_ms", "cycle_monotonic_ms", "object_id",
     "expected_object_count",
     "class_label", "scene_id", "condition_id", "distance_condition",
     "view_condition", "occlusion_percent", "lighting_condition",
@@ -26,8 +26,12 @@ REQUIRED_COLUMNS = [
     "plane_raycast_success",
     "plane_position_x", "plane_position_y", "plane_position_z", "depth_world_x",
     "depth_world_y", "depth_world_z", "fused_position_x", "fused_position_y",
-    "fused_position_z", "output_yaw_deg", "output_scale_x", "output_scale_y",
-    "output_scale_z", "track_id", "track_state", "capture_latency_ms",
+    "fused_position_z", "camera_world_position_x", "camera_world_position_y",
+    "camera_world_position_z", "camera_world_rotation_x", "camera_world_rotation_y",
+    "camera_world_rotation_z", "camera_world_rotation_w", "output_position_x",
+    "output_position_y", "output_position_z", "output_rotation_x", "output_rotation_y",
+    "output_rotation_z", "output_rotation_w", "output_yaw_deg", "output_scale_x",
+    "output_scale_y", "output_scale_z", "track_id", "track_state", "capture_latency_ms",
     "yolo_latency_ms", "output_readback_latency_ms", "depth_latency_ms",
     "raycast_fusion_latency_ms", "tracking_latency_ms", "total_latency_ms",
     "depth_occlusion_usable", "fade_fallback_active", "output_opacity",
@@ -56,12 +60,17 @@ BOOLEAN_COLUMNS = {
 }
 
 NUMERIC_COLUMNS = {
-    "frame_id", "timestamp_ms", "expected_object_count", "occlusion_percent", "yolo_confidence", "bbox_x",
+    "frame_id", "timestamp_ms", "cycle_monotonic_ms", "expected_object_count", "occlusion_percent", "yolo_confidence", "bbox_x",
     "bbox_y", "bbox_width", "bbox_height", "depth_valid_sample_count",
     "depth_sample_capacity",
     "depth_median_m", "depth_confidence", "plane_position_x", "plane_position_y",
     "plane_position_z", "depth_world_x", "depth_world_y", "depth_world_z",
-    "fused_position_x", "fused_position_y", "fused_position_z", "output_yaw_deg",
+    "fused_position_x", "fused_position_y", "fused_position_z",
+    "camera_world_position_x", "camera_world_position_y", "camera_world_position_z",
+    "camera_world_rotation_x", "camera_world_rotation_y", "camera_world_rotation_z",
+    "camera_world_rotation_w", "output_position_x", "output_position_y",
+    "output_position_z", "output_rotation_x", "output_rotation_y", "output_rotation_z",
+    "output_rotation_w", "output_yaw_deg",
     "output_scale_x", "output_scale_y", "output_scale_z", "track_id",
     "capture_latency_ms", "yolo_latency_ms", "output_readback_latency_ms",
     "depth_latency_ms", "raycast_fusion_latency_ms", "tracking_latency_ms",
@@ -319,7 +328,8 @@ def run_self_test() -> int:
     row = {column: "" for column in REQUIRED_COLUMNS}
     row.update({
         "session_id": "session_test", "trial_id": "trial_001", "frame_id": "1",
-        "timestamp_ms": "1000", "object_id": "cup_001", "expected_object_count": "1",
+        "timestamp_ms": "1000", "cycle_monotonic_ms": "1000.5",
+        "object_id": "cup_001", "expected_object_count": "1",
         "class_label": "cup",
         "scene_id": "scene_001", "condition_id": "baseline",
         "distance_condition": "1.0m", "view_condition": "frontal",
@@ -335,6 +345,13 @@ def run_self_test() -> int:
         "plane_position_x": "0", "plane_position_y": "0", "plane_position_z": "1",
         "depth_world_x": "0", "depth_world_y": "0.1", "depth_world_z": "1",
         "fused_position_x": "0", "fused_position_y": "0", "fused_position_z": "1",
+        "camera_world_position_x": "0", "camera_world_position_y": "1",
+        "camera_world_position_z": "0", "camera_world_rotation_x": "0",
+        "camera_world_rotation_y": "0", "camera_world_rotation_z": "0",
+        "camera_world_rotation_w": "1", "output_position_x": "0",
+        "output_position_y": "0", "output_position_z": "1",
+        "output_rotation_x": "0", "output_rotation_y": "1",
+        "output_rotation_z": "0", "output_rotation_w": "0",
         "output_yaw_deg": "180", "output_scale_x": "1", "output_scale_y": "1",
         "output_scale_z": "1", "track_id": "1", "track_state": "Locked",
         "capture_latency_ms": "2", "yolo_latency_ms": "10",

@@ -416,6 +416,8 @@ namespace AR80sRetro
             {
                 FrameId = cycleDiagnostics.FrameId,
                 TimestampMs = cycleDiagnostics.TimestampMs,
+                CycleMonotonicMs = ExperimentClock.TimestampMilliseconds(
+                    cycleDiagnostics.CycleStartTimestamp),
                 ClassLabel = detection.Label,
                 YoloConfidence = detection.Confidence,
                 BboxX = detection.NormalizedBox.x,
@@ -465,6 +467,8 @@ namespace AR80sRetro
                 {
                     FrameId = cycleDiagnostics.FrameId,
                     TimestampMs = cycleDiagnostics.TimestampMs,
+                    CycleMonotonicMs = ExperimentClock.TimestampMilliseconds(
+                        cycleDiagnostics.CycleStartTimestamp),
                     ClassLabel = tracked.Label,
                     CaptureLatencyMs = cycleDiagnostics.CaptureLatencyMs,
                     YoloLatencyMs = cycleDiagnostics.YoloLatencyMs,
@@ -538,6 +542,13 @@ namespace AR80sRetro
             record.DepthOcclusionUsable = depthProvider != null
                 && depthProvider.IsEnvironmentDepthUsable;
             record.FadeFallbackActive = IsFadeFallbackActive();
+            if (arCamera != null)
+            {
+                Transform cameraTransform = arCamera.transform;
+                record.CameraWorldPosition = cameraTransform.position;
+                record.CameraWorldRotation = cameraTransform.rotation;
+            }
+
             if (tracked == null)
             {
                 return;
@@ -552,6 +563,8 @@ namespace AR80sRetro
             }
 
             Transform instanceTransform = tracked.Instance.transform;
+            record.OutputPosition = instanceTransform.position;
+            record.OutputRotation = instanceTransform.rotation;
             record.OutputYawDegrees = instanceTransform.eulerAngles.y;
             record.OutputScale = instanceTransform.localScale;
         }

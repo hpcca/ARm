@@ -29,7 +29,97 @@ namespace AR80sRetro
 
         public Texture2D CameraTexture => cameraTexture;
         public bool HasFrame { get; private set; }
+        public FrameRotation ConfiguredFrameRotation => frameRotation;
+        public Quaternion CpuImageToUnityCameraRotation =>
+            GetCpuImageToUnityCameraRotation(frameRotation);
+        public string CpuImageToUnityCameraTransformId =>
+            GetCpuImageToUnityCameraTransformId(frameRotation);
+        public string DepthUvTransformId =>
+            $"screen_top_left_to_cpu_top_left_v1_{frameRotation}_mirror_y";
         public event Action<Texture2D> FrameReady;
+
+        public static Quaternion GetCpuImageToUnityCameraRotation(
+            FrameRotation rotation)
+        {
+            switch (rotation)
+            {
+                case FrameRotation.Clockwise90:
+                    return Quaternion.Euler(0f, 0f, 90f);
+                case FrameRotation.CounterClockwise90:
+                    return Quaternion.Euler(0f, 0f, -90f);
+                default:
+                    return Quaternion.identity;
+            }
+        }
+
+        public static string GetCpuImageToUnityCameraTransformId(
+            FrameRotation rotation)
+        {
+            return $"apriltag_cpu_pose_to_unity_camera_v1_{rotation}";
+        }
+
+        public static Vector2 OutputImageToCpuImageNormalized(
+            Vector2 outputImagePoint,
+            FrameRotation rotation)
+        {
+            Vector2 clampedPoint = new Vector2(
+                Mathf.Clamp01(outputImagePoint.x),
+                Mathf.Clamp01(outputImagePoint.y));
+            switch (rotation)
+            {
+                case FrameRotation.Clockwise90:
+                    return new Vector2(
+                        1f - clampedPoint.y,
+                        1f - clampedPoint.x);
+                case FrameRotation.CounterClockwise90:
+                    return new Vector2(
+                        clampedPoint.y,
+                        clampedPoint.x);
+                default:
+                    return new Vector2(
+                        1f - clampedPoint.x,
+                        clampedPoint.y);
+            }
+        }
+
+        public bool TryScreenPointToCpuImageNormalized(
+            Vector2 screenPointNormalizedTopLeft,
+            out Vector2 cpuImagePointNormalizedTopLeft)
+        {
+            cpuImagePointNormalizedTopLeft = default;
+            if (cameraTexture == null || Screen.width <= 0 || Screen.height <= 0)
+            {
+                return false;
+            }
+
+            Vector2 effectiveScreenScale = screenScale;
+            if (effectiveScreenScale.x <= 0f || effectiveScreenScale.y <= 0f)
+            {
+                effectiveScreenScale = Vector2.one;
+            }
+
+            Vector2 uncroppedScreenPoint = new Vector2(
+                (screenPointNormalizedTopLeft.x - 0.5f - screenOffsetNormalized.x)
+                    / effectiveScreenScale.x + 0.5f,
+                (screenPointNormalizedTopLeft.y - 0.5f - screenOffsetNormalized.y)
+                    / effectiveScreenScale.y + 0.5f);
+
+            float aspectFillScale = Mathf.Max(
+                (float)Screen.width / cameraTexture.width,
+                (float)Screen.height / cameraTexture.height);
+            float renderedWidth = cameraTexture.width * aspectFillScale;
+            float renderedHeight = cameraTexture.height * aspectFillScale;
+            float croppedX = (renderedWidth - Screen.width) * 0.5f;
+            float croppedY = (renderedHeight - Screen.height) * 0.5f;
+            Vector2 outputImagePoint = new Vector2(
+                (uncroppedScreenPoint.x * Screen.width + croppedX) / renderedWidth,
+                (uncroppedScreenPoint.y * Screen.height + croppedY) / renderedHeight);
+
+            cpuImagePointNormalizedTopLeft = OutputImageToCpuImageNormalized(
+                outputImagePoint,
+                frameRotation);
+            return true;
+        }
 
         public Rect ImageRectToScreenRect(Rect imageRect)
         {

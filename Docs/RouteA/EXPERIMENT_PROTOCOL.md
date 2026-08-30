@@ -70,6 +70,9 @@ not enter Route A inference. Without independent ground truth:
 ARCore's own plane pose, adjacent predictions, visual judgement and a single ruler
 reading are not ground truth.
 
+The evaluation-only AprilTag implementation, coordinate conventions, calibration
+gates and 12-run single-cup pilot are specified in `APRILTAG_GT_PROTOCOL.md`.
+
 ## Reported metrics
 
 - Latency median/P95 by stage; effective inference FPS.
